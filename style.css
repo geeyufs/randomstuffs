@@ -1,0 +1,426 @@
+/* Reset and Base Styles */
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+:root {
+  --bg-color: #0b0c0f;
+  --panel-bg: #111218;
+  --header-bg: #16171d;
+  --border-color: #21232d;
+  --text-primary: #e3e6eb;
+  --text-secondary: #9aa0a6;
+  --accent-blue: #3b82f6;
+  --accent-blue-hover: #2563eb;
+  --accent-glow: rgba(59, 130, 246, 0.25);
+  --btn-bg: #1e202a;
+  --btn-hover: #2a2d3c;
+  --success-color: #10b981;
+  --editor-font: 'JetBrains Mono', monospace;
+  --sans-font: 'Inter', sans-serif;
+  --header-height: 48px;
+}
+
+body {
+  background-color: var(--bg-color);
+  color: var(--text-primary);
+  font-family: var(--sans-font);
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* App Container Layout */
+.app-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+}
+
+/* Header Styles */
+.app-header {
+  height: var(--header-height);
+  background-color: var(--header-bg);
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 16px;
+  z-index: 10;
+  flex-shrink: 0;
+}
+
+.header-left, .header-center, .header-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: var(--text-primary);
+  letter-spacing: -0.2px;
+}
+
+.logo-icon {
+  width: 18px;
+  height: 18px;
+  color: var(--accent-blue);
+}
+
+/* Status Pill */
+.status-pill {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.75rem;
+  padding: 3px 8px;
+  background-color: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.2);
+  border-radius: 12px;
+  color: var(--success-color);
+  transition: opacity 0.3s ease;
+  user-select: none;
+}
+
+.status-pill.saving {
+  color: var(--text-secondary);
+  background-color: rgba(154, 160, 166, 0.1);
+  border: 1px solid rgba(154, 160, 166, 0.2);
+}
+
+.status-pill.saving .status-dot {
+  background-color: var(--text-secondary);
+  animation: pulse 1s infinite alternate;
+}
+
+.status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: var(--success-color);
+}
+
+@keyframes pulse {
+  0% { opacity: 0.4; }
+  100% { opacity: 1; }
+}
+
+/* Segmented View Toggle Buttons */
+.header-center {
+  background-color: rgba(0, 0, 0, 0.2);
+  padding: 3px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  gap: 2px;
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.view-toggle-btn {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  padding: 6px 12px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.view-toggle-btn:hover {
+  color: var(--text-primary);
+}
+
+.view-toggle-btn.active {
+  background-color: var(--btn-bg);
+  color: var(--text-primary);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+}
+
+/* Header Buttons */
+.header-btn {
+  background-color: var(--btn-bg);
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.2s ease;
+}
+
+.header-btn:hover {
+  background-color: var(--btn-hover);
+  color: var(--text-primary);
+  border-color: #2e3241;
+}
+
+/* Workspace Panels */
+.workspace {
+  flex-grow: 1;
+  display: flex;
+  overflow: hidden;
+  position: relative;
+  background-color: var(--bg-color);
+}
+
+.pane {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  background-color: var(--panel-bg);
+}
+
+/* (Pane Header styles removed) */
+
+/* Pane Contents */
+.pane-content {
+  flex-grow: 1;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.pane-content.hidden {
+  display: none !important;
+}
+
+/* Editor Style */
+.code-editor {
+  width: 100%;
+  height: 100%;
+  flex-grow: 1;
+  background-color: transparent;
+  border: none;
+  resize: none;
+  outline: none;
+  color: var(--text-primary);
+  font-family: var(--editor-font);
+  font-size: 0.92rem;
+  line-height: 1.6;
+  padding: 20px;
+  overflow-y: auto;
+}
+
+/* Rendered Output Area */
+.rendered-view {
+  overflow-y: auto;
+  padding: 30px;
+}
+
+/* Split Column / Divider */
+.divider-column {
+  width: 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  flex-shrink: 0;
+  z-index: 15;
+  cursor: col-resize;
+  background-color: var(--bg-color);
+  transition: background-color 0.2s ease;
+  user-select: none;
+}
+
+.divider-column:hover,
+.divider-column.dragging {
+  background-color: rgba(59, 130, 246, 0.4);
+}
+
+.divider-line {
+  flex-grow: 1;
+  width: 1px;
+  background-color: var(--border-color);
+  transition: background-color 0.2s ease;
+}
+
+.divider-column:hover .divider-line,
+.divider-column.dragging .divider-line {
+  background-color: var(--accent-blue);
+}
+
+.hidden {
+  display: none !important;
+}
+
+/* Custom Scrollbar Styles */
+.code-editor::-webkit-scrollbar,
+.rendered-view::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.code-editor::-webkit-scrollbar-track,
+.rendered-view::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.code-editor::-webkit-scrollbar-thumb,
+.rendered-view::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+}
+
+.code-editor::-webkit-scrollbar-thumb:hover,
+.rendered-view::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+/* Markdown Rendering Elements Styles */
+.rendered-markdown {
+  max-width: 760px;
+  margin: 0 auto;
+  line-height: 1.62;
+  font-size: 1rem;
+  letter-spacing: -0.05px;
+}
+
+.rendered-markdown > *:first-child {
+  margin-top: 0;
+}
+
+.rendered-markdown h1,
+.rendered-markdown h2,
+.rendered-markdown h3,
+.rendered-markdown h4 {
+  color: #ffffff;
+  font-weight: 600;
+  margin-top: 1.8rem;
+  margin-bottom: 0.9rem;
+  line-height: 1.35;
+}
+
+.rendered-markdown h1 { font-size: 1.8rem; border-bottom: 1px solid var(--border-color); padding-bottom: 0.4rem; }
+.rendered-markdown h2 { font-size: 1.45rem; }
+.rendered-markdown h3 { font-size: 1.25rem; font-weight: 500; }
+.rendered-markdown h4 { font-size: 1.1rem; }
+
+.rendered-markdown p {
+  margin-bottom: 1.1rem;
+  color: var(--text-primary);
+}
+
+.rendered-markdown strong {
+  font-weight: 600;
+  color: #fff;
+}
+
+.rendered-markdown em {
+  color: #d1d5db;
+}
+
+.rendered-markdown ul,
+.rendered-markdown ol {
+  margin-bottom: 1.1rem;
+  padding-left: 20px;
+}
+
+.rendered-markdown li {
+  margin-bottom: 0.5rem;
+  color: var(--text-primary);
+}
+
+.rendered-markdown li::marker {
+  color: var(--text-secondary);
+}
+
+.rendered-markdown code {
+  font-family: var(--editor-font);
+  background-color: rgba(255, 255, 255, 0.06);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.88em;
+  color: #e5c07b; /* Monokai/OneDark yellow style for variables */
+}
+
+.rendered-markdown pre {
+  background-color: rgba(0, 0, 0, 0.25);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 16px;
+  overflow-x: auto;
+  margin-bottom: 1.2rem;
+}
+
+.rendered-markdown pre code {
+  background-color: transparent;
+  padding: 0;
+  border-radius: 0;
+  color: #abb2bf;
+  font-size: 0.88rem;
+}
+
+.rendered-markdown blockquote {
+  border-left: 4px solid var(--accent-blue);
+  padding: 4px 16px;
+  margin: 0 0 1.2rem 0;
+  background-color: rgba(59, 130, 246, 0.04);
+  border-radius: 0 6px 6px 0;
+}
+
+.rendered-markdown blockquote p {
+  margin-bottom: 0;
+  color: #cbd5e1;
+}
+
+/* Custom list layout adjustments to mimic chatbot response format */
+.rendered-markdown ul {
+  list-style-type: disc;
+}
+
+.rendered-markdown ol {
+  list-style-type: decimal;
+}
+
+/* Animations for transition */
+.pane-content {
+  animation: fadeIn 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Responsive adjust for smaller screens */
+@media (max-width: 768px) {
+  .workspace {
+    flex-direction: column;
+  }
+  
+  .divider-column {
+    width: 100%;
+    height: 10px;
+    cursor: row-resize;
+    flex-direction: row;
+  }
+  
+  .divider-line {
+    width: 100%;
+    height: 1px;
+  }
+}
