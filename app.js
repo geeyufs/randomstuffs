@@ -39,6 +39,7 @@ const elements = {
 // Global variables
 let saveTimeout = null;
 let isDragging = false;
+let currentSplitPercent = 50;
 
 // Initialize Markdown library configuration
 if (typeof marked !== 'undefined') {
@@ -61,17 +62,27 @@ function setSaveStatus(status) {
 }
 
 // Render markdown logic
+function renderMarkdown(markdown, target) {
+  if (typeof marked === 'undefined') {
+    target.textContent = markdown;
+    return;
+  }
+
+  const parsed = marked.parse(markdown);
+  if (typeof DOMPurify === 'undefined') {
+    target.textContent = parsed;
+    return;
+  }
+
+  target.innerHTML = DOMPurify.sanitize(parsed, { USE_PROFILES: { html: true } });
+}
+
 function performRender() {
   const leftMarkdown = elements.leftEditor.value;
   const rightMarkdown = elements.rightEditor.value;
   
-  if (typeof marked !== 'undefined') {
-    elements.leftRenderTarget.innerHTML = marked.parse(leftMarkdown);
-    elements.rightRenderTarget.innerHTML = marked.parse(rightMarkdown);
-  } else {
-    elements.leftRenderTarget.textContent = leftMarkdown;
-    elements.rightRenderTarget.textContent = rightMarkdown;
-  }
+  renderMarkdown(leftMarkdown, elements.leftRenderTarget);
+  renderMarkdown(rightMarkdown, elements.rightRenderTarget);
 }
 
 // View toggle controller
@@ -88,6 +99,8 @@ function setViewMode(mode) {
     
     elements.btnModeEdit.classList.remove('active');
     elements.btnModeRender.classList.add('active');
+    elements.btnModeEdit.setAttribute('aria-pressed', 'false');
+    elements.btnModeRender.setAttribute('aria-pressed', 'true');
   } else {
     elements.appContainer.classList.remove('render-mode');
     elements.appContainer.classList.add('edit-mode');
@@ -99,6 +112,8 @@ function setViewMode(mode) {
     
     elements.btnModeEdit.classList.add('active');
     elements.btnModeRender.classList.remove('active');
+    elements.btnModeEdit.setAttribute('aria-pressed', 'true');
+    elements.btnModeRender.setAttribute('aria-pressed', 'false');
   }
   
   localStorage.setItem(STORAGE_KEYS.VIEW_MODE, mode);
@@ -138,6 +153,7 @@ function handleTextareaTab(e) {
 function applySplitPercentage(percent) {
   const isVertical = window.innerWidth <= 768;
   const constrainedPercent = Math.max(10, Math.min(90, percent));
+  currentSplitPercent = constrainedPercent;
   
   if (isVertical) {
     elements.leftPane.style.flex = `0 0 ${constrainedPercent}%`;
@@ -153,7 +169,30 @@ function applySplitPercentage(percent) {
     elements.rightPane.style.height = '';
   }
   
+  elements.dragDivider.setAttribute('aria-orientation', isVertical ? 'horizontal' : 'vertical');
+  elements.dragDivider.setAttribute('aria-valuenow', Math.round(constrainedPercent));
   localStorage.setItem(STORAGE_KEYS.SPLIT_PERCENT, constrainedPercent);
+}
+
+function handleDividerKeyboard(e) {
+  const isVertical = window.innerWidth <= 768;
+  const step = e.shiftKey ? 10 : 5;
+  let nextPercent = currentSplitPercent;
+
+  if ((!isVertical && e.key === 'ArrowLeft') || (isVertical && e.key === 'ArrowUp')) {
+    nextPercent -= step;
+  } else if ((!isVertical && e.key === 'ArrowRight') || (isVertical && e.key === 'ArrowDown')) {
+    nextPercent += step;
+  } else if (e.key === 'Home') {
+    nextPercent = 10;
+  } else if (e.key === 'End') {
+    nextPercent = 90;
+  } else {
+    return;
+  }
+
+  e.preventDefault();
+  applySplitPercentage(nextPercent);
 }
 
 // Initialize dragging resizer logic
@@ -196,12 +235,14 @@ function setupDragResizer() {
   
   // Touch support for mobile devices
   divider.addEventListener('touchstart', (e) => {
+    e.preventDefault();
     isDragging = true;
     divider.classList.add('dragging');
   });
   
   document.addEventListener('touchmove', (e) => {
     if (!isDragging) return;
+    e.preventDefault();
     const touch = e.touches[0];
     const isVertical = window.innerWidth <= 768;
     const rect = workspace.getBoundingClientRect();
@@ -230,6 +271,8 @@ function setupDragResizer() {
     const savedPercent = parseFloat(localStorage.getItem(STORAGE_KEYS.SPLIT_PERCENT)) || 50;
     applySplitPercentage(savedPercent);
   });
+
+  divider.addEventListener('keydown', handleDividerKeyboard);
 }
 
 // Setup Event Listeners

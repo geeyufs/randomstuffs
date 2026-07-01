@@ -68,7 +68,7 @@ body {
   font-weight: 600;
   font-size: 0.95rem;
   color: var(--text-primary);
-  letter-spacing: -0.2px;
+  letter-spacing: 0;
 }
 
 .logo-icon {
@@ -172,6 +172,13 @@ body {
   background-color: var(--btn-hover);
   color: var(--text-primary);
   border-color: #2e3241;
+}
+
+.view-toggle-btn:focus-visible,
+.header-btn:focus-visible,
+.divider-column:focus-visible {
+  outline: 2px solid var(--accent-blue);
+  outline-offset: 2px;
 }
 
 /* Workspace Panels */
@@ -296,7 +303,7 @@ body {
   margin: 0 auto;
   line-height: 1.62;
   font-size: 1rem;
-  letter-spacing: -0.05px;
+  letter-spacing: 0;
 }
 
 .rendered-markdown > *:first-child {
@@ -408,6 +415,31 @@ body {
 
 /* Responsive adjust for smaller screens */
 @media (max-width: 768px) {
+  .app-header {
+    height: auto;
+    min-height: var(--header-height);
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 8px 12px;
+  }
+
+  .header-left,
+  .header-right {
+    flex: 1 1 0;
+  }
+
+  .header-right {
+    justify-content: flex-end;
+  }
+
+  .header-center {
+    position: static;
+    transform: none;
+    order: 3;
+    flex: 0 0 100%;
+    justify-content: center;
+  }
+
   .workspace {
     flex-direction: column;
   }
@@ -422,5 +454,26 @@ body {
   .divider-line {
     width: 100%;
     height: 1px;
+  }
+}
+
+@media (max-width: 560px) {
+  .status-pill {
+    display: none;
+  }
+
+  .header-btn {
+    width: 36px;
+    height: 36px;
+    justify-content: center;
+    gap: 0;
+    padding: 8px;
+    font-size: 0;
+  }
+
+  .header-btn svg {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
   }
 }
