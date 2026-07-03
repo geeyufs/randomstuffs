@@ -45,6 +45,9 @@ let dragState = null;
 let isDeleteMode = false;
 let pendingDeletePanelId = null;
 let pendingNameMode = null;
+let scrollSaveTimers = new Map();
+let isRestoringScroll = false;
+let restoreScrollTimer = null;
 
 if (typeof marked !== 'undefined') {
   marked.setOptions({
@@ -64,7 +67,9 @@ function createPanelId() {
 function createEmptyPanels(count = DEFAULT_PANEL_COUNT) {
   return Array.from({ length: count }, () => ({
     id: createPanelId(),
-    text: ''
+    text: '',
+    editorScrollTop: 0,
+    renderScrollTop: 0
   }));
 }
 
@@ -167,7 +172,9 @@ function normalizePanels(value) {
     .filter((panel) => panel && typeof panel === 'object')
     .map((panel) => ({
       id: typeof panel.id === 'string' && panel.id ? panel.id : createPanelId(),
-      text: typeof panel.text === 'string' ? panel.text : ''
+      text: typeof panel.text === 'string' ? panel.text : '',
+      editorScrollTop: Number.isFinite(Number(panel.editorScrollTop)) ? Math.max(0, Number(panel.editorScrollTop)) : 0,
+      renderScrollTop: Number.isFinite(Number(panel.renderScrollTop)) ? Math.max(0, Number(panel.renderScrollTop)) : 0
     }));
 
   return normalized.length ? normalized : null;
@@ -262,12 +269,19 @@ function writeLibraryToStorage() {
   localStorage.setItem(STORAGE_KEYS.LIBRARY, encodeStorageValue(JSON.stringify(library)));
 }
 
-function collectPanelValues() {
+function collectPanelValues({ preserveRenderScroll = false } = {}) {
   panels = panels.map((panel) => {
-    const textarea = elements.workspace.querySelector(`[data-panel-id="${panel.id}"] textarea`);
+    const pane = elements.workspace.querySelector(`[data-panel-id="${panel.id}"]`);
+    const textarea = pane ? pane.querySelector('textarea') : null;
+    const renderedView = pane ? pane.querySelector('.rendered-view') : null;
+
     return {
       ...panel,
-      text: textarea ? textarea.value : panel.text
+      text: textarea ? textarea.value : panel.text,
+      editorScrollTop: textarea ? textarea.scrollTop : panel.editorScrollTop,
+      renderScrollTop: preserveRenderScroll
+        ? panel.renderScrollTop
+        : (renderedView ? renderedView.scrollTop : panel.renderScrollTop)
     };
   });
 }
@@ -289,7 +303,7 @@ function renderMarkdown(markdown, target) {
 }
 
 function performRender() {
-  collectPanelValues();
+  collectPanelValues({ preserveRenderScroll: true });
 
   panels.forEach((panel) => {
     const pane = elements.workspace.querySelector(`[data-panel-id="${panel.id}"]`);
@@ -299,6 +313,8 @@ function performRender() {
       renderMarkdown(panel.text, target);
     }
   });
+
+  panels.forEach(restorePanelScroll);
 }
 
 function setDirty(dirty) {
@@ -326,6 +342,15 @@ function saveAllData() {
 function triggerSaveButton() {
   setDirty(true);
   elements.btnSave.click();
+}
+
+function persistTransientPanelState(dirtyOnStart) {
+  if (dirtyOnStart || isDirty) {
+    setDirty(true);
+    return;
+  }
+
+  triggerSaveButton();
 }
 
 function saveLayout() {
@@ -392,8 +417,10 @@ function applyPaneSizes(shouldPersist = true) {
 }
 
 function resetLayout() {
+  const dirtyOnStart = isDirty;
   paneSizes = equalPaneSizes();
-  applyPaneSizes();
+  applyPaneSizes(false);
+  persistTransientPanelState(dirtyOnStart);
 }
 
 function createPaneMarkup(panel, index) {
@@ -402,6 +429,14 @@ function createPaneMarkup(panel, index) {
 
   return `
     <section class="pane" data-panel-id="${panel.id}">
+      <div class="panel-actions" aria-label="Panel actions">
+        <button class="panel-action-btn" type="button" data-panel-action="copy" title="Copy panel" aria-label="Copy panel">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" width="14" height="14"><rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+        </button>
+        <button class="panel-action-btn" type="button" data-panel-action="clear" title="Clear panel" aria-label="Clear panel">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" width="14" height="14"><path d="M3 6h18"></path><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path></svg>
+        </button>
+      </div>
       <div class="pane-content editor-view${hiddenEditorClass}">
         <textarea class="code-editor" aria-label="Panel ${index + 1} text editor" placeholder="Paste or type text here..." spellcheck="false"></textarea>
       </div>
@@ -410,6 +445,143 @@ function createPaneMarkup(panel, index) {
       </div>
     </section>
   `;
+}
+
+function restorePanelScroll(panel) {
+  const pane = elements.workspace.querySelector(`[data-panel-id="${panel.id}"]`);
+
+  if (!pane) {
+    return;
+  }
+
+  const textarea = pane.querySelector('textarea');
+  const renderedView = pane.querySelector('.rendered-view');
+
+  isRestoringScroll = true;
+  clearTimeout(restoreScrollTimer);
+
+  if (textarea) {
+    textarea.scrollTop = panel.editorScrollTop || 0;
+  }
+
+  if (renderedView) {
+    renderedView.scrollTop = panel.renderScrollTop || 0;
+  }
+
+  restoreScrollTimer = setTimeout(() => {
+    isRestoringScroll = false;
+  }, 0);
+}
+
+function updatePanelScroll(panelId, source, scrollTop) {
+  const panel = panels.find((item) => item.id === panelId);
+
+  if (!panel) {
+    return;
+  }
+
+  if (source === 'render') {
+    panel.renderScrollTop = scrollTop;
+  } else {
+    panel.editorScrollTop = scrollTop;
+  }
+}
+
+function schedulePanelScrollSave(panelId, source, scrollTop) {
+  updatePanelScroll(panelId, source, scrollTop);
+
+  if (isRestoringScroll) {
+    return;
+  }
+
+  const existingTimer = scrollSaveTimers.get(panelId);
+  const dirtyOnStart = existingTimer ? existingTimer.dirtyOnStart : isDirty;
+
+  if (existingTimer) {
+    clearTimeout(existingTimer.id);
+  }
+
+  const id = setTimeout(() => {
+    scrollSaveTimers.delete(panelId);
+    persistTransientPanelState(dirtyOnStart);
+  }, 300);
+
+  scrollSaveTimers.set(panelId, { id, dirtyOnStart });
+}
+
+async function copyPanelById(panelId) {
+  collectPanelValues();
+  const panel = panels.find((item) => item.id === panelId);
+
+  if (!panel) {
+    return;
+  }
+
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    await navigator.clipboard.writeText(panel.text);
+    return;
+  }
+
+  const textarea = document.createElement('textarea');
+  textarea.value = panel.text;
+  textarea.style.position = 'fixed';
+  textarea.style.opacity = '0';
+  document.body.appendChild(textarea);
+  textarea.select();
+  document.execCommand('copy');
+  textarea.remove();
+}
+
+function clearPanelById(panelId) {
+  const panel = panels.find((item) => item.id === panelId);
+
+  if (!panel) {
+    return;
+  }
+
+  panel.text = '';
+  panel.editorScrollTop = 0;
+  panel.renderScrollTop = 0;
+
+  const pane = elements.workspace.querySelector(`[data-panel-id="${panelId}"]`);
+  const textarea = pane ? pane.querySelector('textarea') : null;
+
+  if (textarea) {
+    textarea.value = '';
+    textarea.scrollTop = 0;
+  }
+
+  setDirty(true);
+
+  if (viewMode === 'render') {
+    performRender();
+  }
+}
+
+function handlePanelActionClick(e) {
+  const button = e.target.closest('.panel-action-btn');
+
+  if (!button) {
+    return;
+  }
+
+  e.preventDefault();
+  e.stopPropagation();
+
+  const pane = button.closest('.pane');
+  const panelId = pane ? pane.dataset.panelId : null;
+
+  if (!panelId) {
+    return;
+  }
+
+  if (button.dataset.panelAction === 'copy') {
+    copyPanelById(panelId).catch((error) => {
+      console.warn('Unable to copy panel text.', error);
+    });
+  } else if (button.dataset.panelAction === 'clear') {
+    clearPanelById(panelId);
+  }
 }
 
 function createDividerMarkup(index) {
@@ -433,12 +605,19 @@ function renderWorkspace() {
   panels.forEach((panel) => {
     const pane = elements.workspace.querySelector(`[data-panel-id="${panel.id}"]`);
     const textarea = pane.querySelector('textarea');
+    const renderedView = pane.querySelector('.rendered-view');
     textarea.value = panel.text;
     textarea.addEventListener('input', () => setDirty(true));
     textarea.addEventListener('keydown', handleTextareaTab);
+    textarea.addEventListener('scroll', () => schedulePanelScrollSave(panel.id, 'editor', textarea.scrollTop));
+    renderedView.addEventListener('scroll', () => schedulePanelScrollSave(panel.id, 'render', renderedView.scrollTop));
+    pane.querySelectorAll('.panel-action-btn').forEach((button) => {
+      button.addEventListener('click', handlePanelActionClick);
+    });
     pane.addEventListener('mouseenter', handleDeletePanelHover);
     pane.addEventListener('mouseleave', handleDeletePanelLeave);
     pane.addEventListener('click', handleDeletePanelClick);
+    restorePanelScroll(panel);
   });
 
   elements.workspace.querySelectorAll('.divider-column').forEach((divider) => {
@@ -501,6 +680,8 @@ function setViewMode(mode) {
   elements.workspace.querySelectorAll('.rendered-view').forEach((rendered) => {
     rendered.classList.toggle('hidden', viewMode !== 'render');
   });
+
+  panels.forEach(restorePanelScroll);
 }
 
 function addPanel() {
@@ -513,7 +694,9 @@ function addPanel() {
 
   panels.push({
     id: createPanelId(),
-    text: ''
+    text: '',
+    editorScrollTop: 0,
+    renderScrollTop: 0
   });
 
   renderWorkspace();
@@ -728,7 +911,9 @@ function clearAllData() {
   collectPanelValues();
   panels = panels.map((panel) => ({
     ...panel,
-    text: ''
+    text: '',
+    editorScrollTop: 0,
+    renderScrollTop: 0
   }));
 
   renderWorkspace();

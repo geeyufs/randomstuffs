@@ -278,6 +278,7 @@ input {
 .save-btn:focus-visible,
 .header-btn:focus-visible,
 .icon-btn:focus-visible,
+.panel-action-btn:focus-visible,
 .library-select:focus-visible,
 .modal-checkbox input:focus-visible,
 .divider-column:focus-visible {
@@ -319,6 +320,49 @@ input {
   border-radius: 6px;
   pointer-events: none;
   box-shadow: inset 0 0 0 1px rgba(239, 68, 68, 0.2), 0 0 0 1px rgba(239, 68, 68, 0.18);
+}
+
+.panel-actions {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  z-index: 25;
+  display: flex;
+  gap: 6px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.16s ease;
+}
+
+.pane:hover .panel-actions,
+.pane:focus-within .panel-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.delete-panel-mode .panel-actions {
+  display: none;
+}
+
+.panel-action-btn {
+  width: 28px;
+  height: 28px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  background-color: rgba(22, 23, 29, 0.92);
+  color: var(--text-secondary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
+  transition: background-color 0.16s ease, color 0.16s ease, border-color 0.16s ease;
+}
+
+.panel-action-btn:hover {
+  background-color: var(--btn-hover);
+  color: var(--text-primary);
+  border-color: #2e3241;
 }
 
 /* (Pane Header styles removed) */
