@@ -1,47 +1,51 @@
-// Default Texts
-const DEFAULT_LEFT_TEXT = '';
-const DEFAULT_RIGHT_TEXT = '';
+const DEFAULT_PANEL_COUNT = 2;
+const BASE_MIN_PANEL_PERCENT = 10;
+const STORAGE_CODEC_KEY = 'comparator-storage-v1';
 
-// LocalStorage Keys
 const STORAGE_KEYS = {
-  LEFT_TEXT: 'text_comp_left_text',
-  RIGHT_TEXT: 'text_comp_right_text',
-  VIEW_MODE: 'text_comp_view_mode',
-  SPLIT_PERCENT: 'text_comp_split_percent'
+  LIBRARY: 'text_comp_library_v1',
+  SKIP_DELETE_CONFIRM: 'text_comp_skip_delete_confirm'
 };
 
-// DOM Elements
 const elements = {
   appContainer: document.getElementById('app-container'),
   workspace: document.querySelector('.workspace'),
-  leftPane: document.getElementById('left-pane'),
-  rightPane: document.getElementById('right-pane'),
-  dragDivider: document.getElementById('drag-divider'),
-  
-  leftEditor: document.getElementById('left-editor'),
-  rightEditor: document.getElementById('right-editor'),
-  leftRenderTarget: document.getElementById('left-render-target'),
-  rightRenderTarget: document.getElementById('right-render-target'),
-  
-  leftEditorContainer: document.getElementById('left-editor-container'),
-  rightEditorContainer: document.getElementById('right-editor-container'),
-  leftRenderContainer: document.getElementById('left-render-container'),
-  rightRenderContainer: document.getElementById('right-render-container'),
-  
-  // Navigation / Actions
+  groupSelect: document.getElementById('group-select'),
+  entrySelect: document.getElementById('entry-select'),
+  btnAddGroup: document.getElementById('btn-add-group'),
+  btnAddEntry: document.getElementById('btn-add-entry'),
+  btnRemoveGroup: document.getElementById('btn-remove-group'),
+  btnRemoveEntry: document.getElementById('btn-remove-entry'),
   btnModeEdit: document.getElementById('btn-mode-edit'),
   btnModeRender: document.getElementById('btn-mode-render'),
+  btnSave: document.getElementById('btn-save'),
+  btnSaveText: document.querySelector('.save-btn-text'),
+  btnAddPanel: document.getElementById('btn-add-panel'),
+  btnDeletePanel: document.getElementById('btn-delete-panel'),
   btnResetLayout: document.getElementById('btn-reset-layout'),
   btnClear: document.getElementById('btn-clear'),
-  saveStatus: document.getElementById('save-status')
+  deleteConfirmModal: document.getElementById('delete-confirm-modal'),
+  deleteConfirmSkip: document.getElementById('delete-confirm-skip'),
+  btnDeleteCancel: document.getElementById('btn-delete-cancel'),
+  btnDeleteConfirm: document.getElementById('btn-delete-confirm'),
+  nameModal: document.getElementById('name-modal'),
+  nameModalTitle: document.getElementById('name-modal-title'),
+  nameModalLabel: document.getElementById('name-modal-label'),
+  nameModalInput: document.getElementById('name-modal-input'),
+  btnNameCancel: document.getElementById('btn-name-cancel'),
+  btnNameConfirm: document.getElementById('btn-name-confirm')
 };
 
-// Global variables
-let saveTimeout = null;
-let isDragging = false;
-let currentSplitPercent = 50;
+let panels = [];
+let paneSizes = [];
+let viewMode = 'edit';
+let library = null;
+let isDirty = false;
+let dragState = null;
+let isDeleteMode = false;
+let pendingDeletePanelId = null;
+let pendingNameMode = null;
 
-// Initialize Markdown library configuration
 if (typeof marked !== 'undefined') {
   marked.setOptions({
     breaks: true,
@@ -49,19 +53,225 @@ if (typeof marked !== 'undefined') {
   });
 }
 
-// Set status indicator
-function setSaveStatus(status) {
-  const text = elements.saveStatus.querySelector('.status-text');
-  if (status === 'saving') {
-    elements.saveStatus.classList.add('saving');
-    text.textContent = 'Saving...';
-  } else {
-    elements.saveStatus.classList.remove('saving');
-    text.textContent = 'Saved';
+function createPanelId() {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+
+  return `panel-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function createEmptyPanels(count = DEFAULT_PANEL_COUNT) {
+  return Array.from({ length: count }, () => ({
+    id: createPanelId(),
+    text: ''
+  }));
+}
+
+function clonePanels(value) {
+  const normalized = normalizePanels(value);
+  return normalized ? normalized.map((panel) => ({ ...panel })) : createEmptyPanels();
+}
+
+function createEntry(name = 'Entry 1') {
+  const entryPanels = createEmptyPanels();
+
+  return {
+    id: createPanelId(),
+    name,
+    panels: entryPanels,
+    layout: equalPaneSizes(entryPanels.length),
+    viewMode: 'edit'
+  };
+}
+
+function createGroup(name = 'Default') {
+  const entry = createEntry();
+
+  return {
+    id: createPanelId(),
+    name,
+    entries: [entry],
+    activeEntryId: entry.id
+  };
+}
+
+function createDefaultLibrary() {
+  const group = createGroup();
+
+  return {
+    version: 1,
+    groups: [group],
+    activeGroupId: group.id
+  };
+}
+
+function bytesToBase64(bytes) {
+  let binary = '';
+  const chunkSize = 0x8000;
+
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+  }
+
+  return btoa(binary);
+}
+
+function base64ToBytes(value) {
+  const binary = atob(value);
+  const bytes = new Uint8Array(binary.length);
+
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+
+  return bytes;
+}
+
+function applyStorageCodec(bytes) {
+  const output = new Uint8Array(bytes);
+
+  for (let i = 0; i < output.length; i += 1) {
+    const keyCode = STORAGE_CODEC_KEY.charCodeAt(i % STORAGE_CODEC_KEY.length);
+    output[i] = output[i] ^ keyCode ^ ((i * 31) & 255);
+  }
+
+  return output;
+}
+
+function encodeStorageValue(value) {
+  const bytes = new TextEncoder().encode(value);
+  return `tc2:${bytesToBase64(applyStorageCodec(bytes))}`;
+}
+
+function decodeStorageValue(value) {
+  if (!value || !value.startsWith('tc2:')) {
+    return null;
+  }
+
+  try {
+    const bytes = applyStorageCodec(base64ToBytes(value.slice(4)));
+    return new TextDecoder().decode(bytes);
+  } catch (error) {
+    console.warn('Unable to decode stored comparator data.', error);
+    return null;
   }
 }
 
-// Render markdown logic
+function normalizePanels(value) {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+
+  const normalized = value
+    .filter((panel) => panel && typeof panel === 'object')
+    .map((panel) => ({
+      id: typeof panel.id === 'string' && panel.id ? panel.id : createPanelId(),
+      text: typeof panel.text === 'string' ? panel.text : ''
+    }));
+
+  return normalized.length ? normalized : null;
+}
+
+function normalizeEntry(value, fallbackName = 'Entry 1') {
+  if (!value || typeof value !== 'object') {
+    return createEntry(fallbackName);
+  }
+
+  const entryPanels = clonePanels(value.panels);
+  const entry = {
+    id: typeof value.id === 'string' && value.id ? value.id : createPanelId(),
+    name: typeof value.name === 'string' && value.name.trim() ? value.name.trim() : fallbackName,
+    panels: entryPanels,
+    layout: Array.isArray(value.layout) ? value.layout : equalPaneSizes(entryPanels.length),
+    viewMode: value.viewMode === 'render' ? 'render' : 'edit'
+  };
+
+  return entry;
+}
+
+function normalizeGroup(value, fallbackName = 'Default') {
+  if (!value || typeof value !== 'object') {
+    return createGroup(fallbackName);
+  }
+
+  const entries = Array.isArray(value.entries)
+    ? value.entries.map((entry, index) => normalizeEntry(entry, `Entry ${index + 1}`))
+    : [];
+  const normalizedEntries = entries.length ? entries : [createEntry()];
+  const activeEntryExists = normalizedEntries.some((entry) => entry.id === value.activeEntryId);
+
+  return {
+    id: typeof value.id === 'string' && value.id ? value.id : createPanelId(),
+    name: typeof value.name === 'string' && value.name.trim() ? value.name.trim() : fallbackName,
+    entries: normalizedEntries,
+    activeEntryId: activeEntryExists ? value.activeEntryId : normalizedEntries[0].id
+  };
+}
+
+function normalizeLibrary(value) {
+  if (!value || typeof value !== 'object' || !Array.isArray(value.groups)) {
+    return null;
+  }
+
+  const groups = value.groups.map((group, index) => normalizeGroup(group, index === 0 ? 'Default' : `Group ${index + 1}`));
+
+  if (!groups.length) {
+    return null;
+  }
+
+  const activeGroupExists = groups.some((group) => group.id === value.activeGroupId);
+
+  return {
+    version: 1,
+    groups,
+    activeGroupId: activeGroupExists ? value.activeGroupId : groups[0].id
+  };
+}
+
+function getActiveGroup() {
+  return library.groups.find((group) => group.id === library.activeGroupId) || library.groups[0];
+}
+
+function getActiveEntry() {
+  const group = getActiveGroup();
+  return group.entries.find((entry) => entry.id === group.activeEntryId) || group.entries[0];
+}
+
+function captureCurrentEntryState() {
+  collectPanelValues();
+
+  return {
+    panels: clonePanels(panels),
+    layout: [...paneSizes],
+    viewMode
+  };
+}
+
+function applyEntry(entry) {
+  panels = clonePanels(entry.panels);
+  paneSizes = Array.isArray(entry.layout) ? [...entry.layout] : equalPaneSizes(panels.length);
+  viewMode = entry.viewMode === 'render' ? 'render' : 'edit';
+
+  renderWorkspace();
+  setViewMode(viewMode);
+  setDirty(false);
+}
+
+function writeLibraryToStorage() {
+  localStorage.setItem(STORAGE_KEYS.LIBRARY, encodeStorageValue(JSON.stringify(library)));
+}
+
+function collectPanelValues() {
+  panels = panels.map((panel) => {
+    const textarea = elements.workspace.querySelector(`[data-panel-id="${panel.id}"] textarea`);
+    return {
+      ...panel,
+      text: textarea ? textarea.value : panel.text
+    };
+  });
+}
+
 function renderMarkdown(markdown, target) {
   if (typeof marked === 'undefined') {
     target.textContent = markdown;
@@ -69,6 +279,7 @@ function renderMarkdown(markdown, target) {
   }
 
   const parsed = marked.parse(markdown);
+
   if (typeof DOMPurify === 'undefined') {
     target.textContent = parsed;
     return;
@@ -78,25 +289,198 @@ function renderMarkdown(markdown, target) {
 }
 
 function performRender() {
-  const leftMarkdown = elements.leftEditor.value;
-  const rightMarkdown = elements.rightEditor.value;
-  
-  renderMarkdown(leftMarkdown, elements.leftRenderTarget);
-  renderMarkdown(rightMarkdown, elements.rightRenderTarget);
+  collectPanelValues();
+
+  panels.forEach((panel) => {
+    const pane = elements.workspace.querySelector(`[data-panel-id="${panel.id}"]`);
+    const target = pane ? pane.querySelector('.rendered-markdown') : null;
+
+    if (target) {
+      renderMarkdown(panel.text, target);
+    }
+  });
 }
 
-// View toggle controller
+function setDirty(dirty) {
+  isDirty = dirty;
+  elements.btnSave.disabled = !dirty;
+  elements.btnSave.classList.toggle('dirty', dirty);
+  elements.btnSave.setAttribute('aria-label', dirty ? 'Save changes' : 'Saved');
+  elements.btnSaveText.textContent = dirty ? 'Save' : 'Saved';
+}
+
+function writeCurrentEntry() {
+  const entry = getActiveEntry();
+  const state = captureCurrentEntryState();
+  entry.panels = state.panels;
+  entry.layout = state.layout;
+  entry.viewMode = state.viewMode;
+  writeLibraryToStorage();
+}
+
+function saveAllData() {
+  writeCurrentEntry();
+  setDirty(false);
+}
+
+function triggerSaveButton() {
+  setDirty(true);
+  elements.btnSave.click();
+}
+
+function saveLayout() {
+  setDirty(true);
+}
+
+function equalPaneSizes(count = panels.length) {
+  const size = 100 / Math.max(1, count);
+  return Array.from({ length: count }, () => size);
+}
+
+function normalizePaneSizes(sizes) {
+  if (!Array.isArray(sizes) || sizes.length !== panels.length) {
+    return equalPaneSizes();
+  }
+
+  const numericSizes = sizes.map((size) => Number(size));
+
+  if (numericSizes.some((size) => !Number.isFinite(size) || size <= 0)) {
+    return equalPaneSizes();
+  }
+
+  const total = numericSizes.reduce((sum, size) => sum + size, 0);
+
+  if (!total) {
+    return equalPaneSizes();
+  }
+
+  return numericSizes.map((size) => (size / total) * 100);
+}
+
+function getMinPanelPercent() {
+  return Math.min(BASE_MIN_PANEL_PERCENT, (100 / Math.max(1, panels.length)) * 0.35);
+}
+
+function getPanelLayoutSize(isVertical) {
+  const workspaceRect = elements.workspace.getBoundingClientRect();
+  const workspaceSize = isVertical ? workspaceRect.height : workspaceRect.width;
+  const dividerSize = Array.from(elements.workspace.querySelectorAll('.divider-column'))
+    .reduce((total, divider) => {
+      const dividerRect = divider.getBoundingClientRect();
+      return total + (isVertical ? dividerRect.height : dividerRect.width);
+    }, 0);
+
+  return Math.max(1, workspaceSize - dividerSize);
+}
+
+function applyPaneSizes(shouldPersist = true) {
+  paneSizes = normalizePaneSizes(paneSizes);
+
+  elements.workspace.querySelectorAll('.pane').forEach((pane, index) => {
+    pane.style.flex = `${paneSizes[index]} 1 0`;
+  });
+
+  const isVertical = window.innerWidth <= 768;
+
+  elements.workspace.querySelectorAll('.divider-column').forEach((divider) => {
+    divider.setAttribute('aria-orientation', isVertical ? 'horizontal' : 'vertical');
+  });
+
+  if (shouldPersist) {
+    saveLayout();
+  }
+}
+
+function resetLayout() {
+  paneSizes = equalPaneSizes();
+  applyPaneSizes();
+}
+
+function createPaneMarkup(panel, index) {
+  const hiddenEditorClass = viewMode === 'render' ? ' hidden' : '';
+  const hiddenRenderClass = viewMode === 'render' ? '' : ' hidden';
+
+  return `
+    <section class="pane" data-panel-id="${panel.id}">
+      <div class="pane-content editor-view${hiddenEditorClass}">
+        <textarea class="code-editor" aria-label="Panel ${index + 1} text editor" placeholder="Paste or type text here..." spellcheck="false"></textarea>
+      </div>
+      <div class="pane-content rendered-view${hiddenRenderClass}">
+        <div class="rendered-markdown"></div>
+      </div>
+    </section>
+  `;
+}
+
+function createDividerMarkup(index) {
+  return `
+    <div class="divider-column" data-divider-index="${index}" role="separator" tabindex="0" aria-label="Resize panels" aria-orientation="vertical">
+      <div class="divider-line"></div>
+    </div>
+  `;
+}
+
+function renderWorkspace() {
+  const markup = panels
+    .map((panel, index) => {
+      const divider = index < panels.length - 1 ? createDividerMarkup(index) : '';
+      return `${createPaneMarkup(panel, index)}${divider}`;
+    })
+    .join('');
+
+  elements.workspace.innerHTML = markup;
+
+  panels.forEach((panel) => {
+    const pane = elements.workspace.querySelector(`[data-panel-id="${panel.id}"]`);
+    const textarea = pane.querySelector('textarea');
+    textarea.value = panel.text;
+    textarea.addEventListener('input', () => setDirty(true));
+    textarea.addEventListener('keydown', handleTextareaTab);
+    pane.addEventListener('mouseenter', handleDeletePanelHover);
+    pane.addEventListener('mouseleave', handleDeletePanelLeave);
+    pane.addEventListener('click', handleDeletePanelClick);
+  });
+
+  elements.workspace.querySelectorAll('.divider-column').forEach((divider) => {
+    divider.addEventListener('pointerdown', startDividerDrag);
+    divider.addEventListener('keydown', handleDividerKeyboard);
+  });
+
+  applyPaneSizes(false);
+
+  if (viewMode === 'render') {
+    performRender();
+  }
+}
+
+function cancelDeleteMode() {
+  isDeleteMode = false;
+  elements.appContainer.classList.remove('delete-panel-mode');
+  elements.btnDeletePanel.classList.remove('active');
+  elements.workspace.querySelectorAll('.pane.delete-target').forEach((pane) => {
+    pane.classList.remove('delete-target');
+  });
+}
+
+function closeDeleteConfirmModal() {
+  pendingDeletePanelId = null;
+  elements.deleteConfirmModal.classList.add('hidden');
+  elements.deleteConfirmSkip.checked = false;
+}
+
+function cancelPendingDelete() {
+  closeDeleteConfirmModal();
+  cancelDeleteMode();
+}
+
 function setViewMode(mode) {
-  if (mode === 'render') {
+  viewMode = mode === 'render' ? 'render' : 'edit';
+
+  if (viewMode === 'render') {
+    cancelDeleteMode();
     performRender();
     elements.appContainer.classList.remove('edit-mode');
     elements.appContainer.classList.add('render-mode');
-    
-    elements.leftEditorContainer.classList.add('hidden');
-    elements.rightEditorContainer.classList.add('hidden');
-    elements.leftRenderContainer.classList.remove('hidden');
-    elements.rightRenderContainer.classList.remove('hidden');
-    
     elements.btnModeEdit.classList.remove('active');
     elements.btnModeRender.classList.add('active');
     elements.btnModeEdit.setAttribute('aria-pressed', 'false');
@@ -104,252 +488,526 @@ function setViewMode(mode) {
   } else {
     elements.appContainer.classList.remove('render-mode');
     elements.appContainer.classList.add('edit-mode');
-    
-    elements.leftEditorContainer.classList.remove('hidden');
-    elements.rightEditorContainer.classList.remove('hidden');
-    elements.leftRenderContainer.classList.add('hidden');
-    elements.rightRenderContainer.classList.add('hidden');
-    
     elements.btnModeEdit.classList.add('active');
     elements.btnModeRender.classList.remove('active');
     elements.btnModeEdit.setAttribute('aria-pressed', 'true');
     elements.btnModeRender.setAttribute('aria-pressed', 'false');
   }
-  
-  localStorage.setItem(STORAGE_KEYS.VIEW_MODE, mode);
+
+  elements.workspace.querySelectorAll('.editor-view').forEach((editor) => {
+    editor.classList.toggle('hidden', viewMode === 'render');
+  });
+
+  elements.workspace.querySelectorAll('.rendered-view').forEach((rendered) => {
+    rendered.classList.toggle('hidden', viewMode !== 'render');
+  });
 }
 
-// Auto-save debounced handler
-function queueAutoSave() {
-  setSaveStatus('saving');
-  if (saveTimeout) {
-    clearTimeout(saveTimeout);
+function addPanel() {
+  cancelDeleteMode();
+  collectPanelValues();
+
+  const newPanelSize = 100 / (panels.length + 1);
+  paneSizes = normalizePaneSizes(paneSizes).map((size) => size * ((100 - newPanelSize) / 100));
+  paneSizes.push(newPanelSize);
+
+  panels.push({
+    id: createPanelId(),
+    text: ''
+  });
+
+  renderWorkspace();
+  setViewMode('edit');
+  setDirty(true);
+
+  const newTextarea = elements.workspace.querySelector(`[data-panel-id="${panels[panels.length - 1].id}"] textarea`);
+  if (newTextarea) {
+    newTextarea.focus();
   }
-  
-  saveTimeout = setTimeout(() => {
-    localStorage.setItem(STORAGE_KEYS.LEFT_TEXT, elements.leftEditor.value);
-    localStorage.setItem(STORAGE_KEYS.RIGHT_TEXT, elements.rightEditor.value);
-    setSaveStatus('saved');
-  }, 400);
 }
 
-// Enable support for indenting code blocks via Tab inside textarea
+function beginDeletePanelMode() {
+  if (panels.length <= 1) {
+    alert('At least one panel must remain.');
+    return;
+  }
+
+  isDeleteMode = true;
+  elements.appContainer.classList.add('delete-panel-mode');
+  elements.btnDeletePanel.classList.add('active');
+}
+
+function handleDeletePanelHover(e) {
+  if (!isDeleteMode) {
+    return;
+  }
+
+  e.currentTarget.classList.add('delete-target');
+}
+
+function handleDeletePanelLeave(e) {
+  e.currentTarget.classList.remove('delete-target');
+}
+
+function handleDeletePanelClick(e) {
+  if (!isDeleteMode) {
+    return;
+  }
+
+  e.preventDefault();
+  e.stopPropagation();
+
+  const panelId = e.currentTarget.dataset.panelId;
+  const panelIndex = panels.findIndex((panel) => panel.id === panelId);
+
+  if (panelIndex === -1) {
+    cancelDeleteMode();
+    return;
+  }
+
+  if (localStorage.getItem(STORAGE_KEYS.SKIP_DELETE_CONFIRM) === 'true') {
+    deletePanelById(panelId);
+    return;
+  }
+
+  pendingDeletePanelId = panelId;
+  elements.deleteConfirmModal.classList.remove('hidden');
+}
+
+function deletePanelById(panelId) {
+  const panelIndex = panels.findIndex((panel) => panel.id === panelId);
+
+  if (panelIndex === -1) {
+    cancelDeleteMode();
+    return;
+  }
+
+  collectPanelValues();
+  panels.splice(panelIndex, 1);
+  paneSizes.splice(panelIndex, 1);
+  paneSizes = normalizePaneSizes(paneSizes);
+
+  cancelDeleteMode();
+  renderWorkspace();
+  setDirty(true);
+}
+
+function confirmPendingDelete() {
+  if (!pendingDeletePanelId) {
+    closeDeleteConfirmModal();
+    cancelDeleteMode();
+    return;
+  }
+
+  if (elements.deleteConfirmSkip.checked) {
+    localStorage.setItem(STORAGE_KEYS.SKIP_DELETE_CONFIRM, 'true');
+  }
+
+  const panelId = pendingDeletePanelId;
+  closeDeleteConfirmModal();
+  deletePanelById(panelId);
+}
+
 function handleTextareaTab(e) {
-  if (e.key === 'Tab') {
-    e.preventDefault();
-    const textarea = e.target;
-    const start = textarea.selectionStart;
-    const end = textarea.selectionEnd;
-    const value = textarea.value;
-    
-    textarea.value = value.substring(0, start) + '  ' + value.substring(end);
-    textarea.selectionStart = textarea.selectionEnd = start + 2;
-    
-    queueAutoSave();
+  if (e.key !== 'Tab') {
+    return;
   }
+
+  e.preventDefault();
+
+  const textarea = e.target;
+  const start = textarea.selectionStart;
+  const end = textarea.selectionEnd;
+  const value = textarea.value;
+
+  textarea.value = `${value.substring(0, start)}  ${value.substring(end)}`;
+  textarea.selectionStart = textarea.selectionEnd = start + 2;
+  setDirty(true);
 }
 
-// Set split-pane layout size
-function applySplitPercentage(percent) {
-  const isVertical = window.innerWidth <= 768;
-  const constrainedPercent = Math.max(10, Math.min(90, percent));
-  currentSplitPercent = constrainedPercent;
-  
-  if (isVertical) {
-    elements.leftPane.style.flex = `0 0 ${constrainedPercent}%`;
-    elements.rightPane.style.flex = `0 0 ${100 - constrainedPercent}%`;
-    // Clear horizontal width overrides if window is resized/loaded vertically
-    elements.leftPane.style.width = '';
-    elements.rightPane.style.width = '';
-  } else {
-    elements.leftPane.style.flex = `0 0 ${constrainedPercent}%`;
-    elements.rightPane.style.flex = `0 0 ${100 - constrainedPercent}%`;
-    // Clear vertical height overrides
-    elements.leftPane.style.height = '';
-    elements.rightPane.style.height = '';
+function startDividerDrag(e) {
+  if (isDeleteMode) {
+    return;
   }
-  
-  elements.dragDivider.setAttribute('aria-orientation', isVertical ? 'horizontal' : 'vertical');
-  elements.dragDivider.setAttribute('aria-valuenow', Math.round(constrainedPercent));
-  localStorage.setItem(STORAGE_KEYS.SPLIT_PERCENT, constrainedPercent);
+
+  e.preventDefault();
+
+  const divider = e.currentTarget;
+  const dividerIndex = Number(divider.dataset.dividerIndex);
+  const isVertical = window.innerWidth <= 768;
+
+  dragState = {
+    divider,
+    dividerIndex,
+    startPosition: isVertical ? e.clientY : e.clientX,
+    workspaceSize: getPanelLayoutSize(isVertical),
+    startSizes: [...paneSizes],
+    isVertical,
+    hasChanged: false,
+    dirtyOnStart: isDirty
+  };
+
+  divider.classList.add('dragging');
+  document.body.style.cursor = isVertical ? 'row-resize' : 'col-resize';
+}
+
+function resizeAdjacentPanels(deltaPercent) {
+  const { dividerIndex, startSizes } = dragState;
+  const leftStart = startSizes[dividerIndex];
+  const rightStart = startSizes[dividerIndex + 1];
+  const minPanelPercent = getMinPanelPercent();
+  const maxLeftDelta = rightStart - minPanelPercent;
+  const maxRightDelta = leftStart - minPanelPercent;
+  const constrainedDelta = Math.max(-maxRightDelta, Math.min(maxLeftDelta, deltaPercent));
+
+  paneSizes = [...startSizes];
+  paneSizes[dividerIndex] = leftStart + constrainedDelta;
+  paneSizes[dividerIndex + 1] = rightStart - constrainedDelta;
+  dragState.hasChanged = dragState.hasChanged || Math.abs(constrainedDelta) > 0.01;
+  applyPaneSizes(false);
+}
+
+function handleDividerPointerMove(e) {
+  if (!dragState) {
+    return;
+  }
+
+  const currentPosition = dragState.isVertical ? e.clientY : e.clientX;
+  const delta = currentPosition - dragState.startPosition;
+  const deltaPercent = (delta / dragState.workspaceSize) * 100;
+  resizeAdjacentPanels(deltaPercent);
+}
+
+function endDividerDrag() {
+  if (!dragState) {
+    return;
+  }
+
+  dragState.divider.classList.remove('dragging');
+  document.body.style.cursor = '';
+  const shouldSave = dragState.hasChanged && !dragState.dirtyOnStart;
+  dragState = null;
+
+  if (shouldSave) {
+    triggerSaveButton();
+  }
 }
 
 function handleDividerKeyboard(e) {
+  const dividerIndex = Number(e.currentTarget.dataset.dividerIndex);
   const isVertical = window.innerWidth <= 768;
   const step = e.shiftKey ? 10 : 5;
-  let nextPercent = currentSplitPercent;
+  let delta = 0;
 
   if ((!isVertical && e.key === 'ArrowLeft') || (isVertical && e.key === 'ArrowUp')) {
-    nextPercent -= step;
+    delta = -step;
   } else if ((!isVertical && e.key === 'ArrowRight') || (isVertical && e.key === 'ArrowDown')) {
-    nextPercent += step;
-  } else if (e.key === 'Home') {
-    nextPercent = 10;
-  } else if (e.key === 'End') {
-    nextPercent = 90;
+    delta = step;
   } else {
     return;
   }
 
   e.preventDefault();
-  applySplitPercentage(nextPercent);
+  dragState = {
+    dividerIndex,
+    startSizes: [...paneSizes],
+    hasChanged: false,
+    dirtyOnStart: isDirty
+  };
+  resizeAdjacentPanels(delta);
+  const shouldSave = dragState.hasChanged && !dragState.dirtyOnStart;
+  dragState = null;
+
+  if (shouldSave) {
+    triggerSaveButton();
+  }
 }
 
-// Initialize dragging resizer logic
-function setupDragResizer() {
-  const divider = elements.dragDivider;
-  const workspace = elements.workspace;
-  
-  divider.addEventListener('mousedown', (e) => {
-    e.preventDefault();
-    isDragging = true;
-    divider.classList.add('dragging');
-    document.body.style.cursor = window.innerWidth <= 768 ? 'row-resize' : 'col-resize';
-  });
-  
-  document.addEventListener('mousemove', (e) => {
-    if (!isDragging) return;
-    
-    const isVertical = window.innerWidth <= 768;
-    const rect = workspace.getBoundingClientRect();
-    let percentage;
-    
-    if (isVertical) {
-      const topHeight = e.clientY - rect.top;
-      percentage = (topHeight / rect.height) * 100;
-    } else {
-      const leftWidth = e.clientX - rect.left;
-      percentage = (leftWidth / rect.width) * 100;
-    }
-    
-    applySplitPercentage(percentage);
-  });
-  
-  document.addEventListener('mouseup', () => {
-    if (isDragging) {
-      isDragging = false;
-      divider.classList.remove('dragging');
-      document.body.style.cursor = '';
-    }
-  });
-  
-  // Touch support for mobile devices
-  divider.addEventListener('touchstart', (e) => {
-    e.preventDefault();
-    isDragging = true;
-    divider.classList.add('dragging');
-  });
-  
-  document.addEventListener('touchmove', (e) => {
-    if (!isDragging) return;
-    e.preventDefault();
-    const touch = e.touches[0];
-    const isVertical = window.innerWidth <= 768;
-    const rect = workspace.getBoundingClientRect();
-    let percentage;
-    
-    if (isVertical) {
-      const topHeight = touch.clientY - rect.top;
-      percentage = (topHeight / rect.height) * 100;
-    } else {
-      const leftWidth = touch.clientX - rect.left;
-      percentage = (leftWidth / rect.width) * 100;
-    }
-    
-    applySplitPercentage(percentage);
-  });
-  
-  document.addEventListener('touchend', () => {
-    if (isDragging) {
-      isDragging = false;
-      divider.classList.remove('dragging');
-    }
-  });
-  
-  // Clean sizes on resize if layout direction changes
-  window.addEventListener('resize', () => {
-    const savedPercent = parseFloat(localStorage.getItem(STORAGE_KEYS.SPLIT_PERCENT)) || 50;
-    applySplitPercentage(savedPercent);
-  });
+function clearAllData() {
+  cancelDeleteMode();
+  collectPanelValues();
+  panels = panels.map((panel) => ({
+    ...panel,
+    text: ''
+  }));
 
-  divider.addEventListener('keydown', handleDividerKeyboard);
+  renderWorkspace();
+  setViewMode(viewMode);
+  setDirty(true);
 }
 
-// Setup Event Listeners
+function renderLibrarySelectors() {
+  const activeGroup = getActiveGroup();
+
+  elements.groupSelect.innerHTML = library.groups
+    .map((group) => `<option value="${group.id}">${escapeOptionText(group.name)}</option>`)
+    .join('');
+  elements.groupSelect.value = activeGroup.id;
+
+  elements.entrySelect.innerHTML = activeGroup.entries
+    .map((entry) => `<option value="${entry.id}">${escapeOptionText(entry.name)}</option>`)
+    .join('');
+  elements.entrySelect.value = activeGroup.activeEntryId;
+  elements.btnRemoveGroup.disabled = library.groups.length <= 1;
+  elements.btnRemoveEntry.disabled = activeGroup.entries.length <= 1;
+}
+
+function escapeOptionText(value) {
+  return String(value)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;');
+}
+
+function confirmDiscardChanges() {
+  return !isDirty || confirm('Discard unsaved changes?');
+}
+
+function switchToActiveEntry() {
+  renderLibrarySelectors();
+  applyEntry(getActiveEntry());
+}
+
+function handleGroupChange() {
+  const previousGroupId = library.activeGroupId;
+
+  if (!confirmDiscardChanges()) {
+    elements.groupSelect.value = previousGroupId;
+    return;
+  }
+
+  const selectedGroup = library.groups.find((group) => group.id === elements.groupSelect.value);
+  if (!selectedGroup) {
+    elements.groupSelect.value = previousGroupId;
+    return;
+  }
+
+  cancelDeleteMode();
+  library.activeGroupId = selectedGroup.id;
+  writeLibraryToStorage();
+  switchToActiveEntry();
+}
+
+function handleEntryChange() {
+  const group = getActiveGroup();
+  const previousEntryId = group.activeEntryId;
+
+  if (!confirmDiscardChanges()) {
+    elements.entrySelect.value = previousEntryId;
+    return;
+  }
+
+  const selectedEntry = group.entries.find((entry) => entry.id === elements.entrySelect.value);
+  if (!selectedEntry) {
+    elements.entrySelect.value = previousEntryId;
+    return;
+  }
+
+  cancelDeleteMode();
+  group.activeEntryId = selectedEntry.id;
+  writeLibraryToStorage();
+  switchToActiveEntry();
+}
+
+function openNameModal(mode) {
+  if (!confirmDiscardChanges()) {
+    return;
+  }
+
+  pendingNameMode = mode;
+  elements.nameModalTitle.textContent = mode === 'group' ? 'New group' : 'New entry';
+  elements.nameModalLabel.textContent = mode === 'group' ? 'Group name' : 'Entry name';
+  elements.nameModalInput.value = '';
+  elements.nameModal.classList.remove('hidden');
+  elements.nameModalInput.focus();
+}
+
+function closeNameModal() {
+  pendingNameMode = null;
+  elements.nameModal.classList.add('hidden');
+  elements.nameModalInput.value = '';
+}
+
+function confirmNameModal() {
+  const name = elements.nameModalInput.value.trim();
+
+  if (!name) {
+    elements.nameModalInput.focus();
+    return;
+  }
+
+  if (pendingNameMode === 'group') {
+    createNamedGroup(name);
+  } else if (pendingNameMode === 'entry') {
+    createNamedEntry(name);
+  }
+
+  closeNameModal();
+}
+
+function addGroup() {
+  openNameModal('group');
+}
+
+function addEntry() {
+  openNameModal('entry');
+}
+
+function createNamedGroup(name) {
+  cancelDeleteMode();
+  const group = createGroup(name);
+  library.groups.push(group);
+  library.activeGroupId = group.id;
+  writeLibraryToStorage();
+  switchToActiveEntry();
+}
+
+function createNamedEntry(name) {
+  cancelDeleteMode();
+  const group = getActiveGroup();
+  const entry = createEntry(name);
+  group.entries.push(entry);
+  group.activeEntryId = entry.id;
+  writeLibraryToStorage();
+  switchToActiveEntry();
+}
+
+function loadLibrary() {
+  const savedLibrary = decodeStorageValue(localStorage.getItem(STORAGE_KEYS.LIBRARY));
+
+  if (savedLibrary) {
+    try {
+      const parsed = JSON.parse(savedLibrary);
+      const normalized = normalizeLibrary(parsed);
+
+      if (normalized) {
+        return normalized;
+      }
+    } catch (error) {
+      console.warn('Unable to parse comparator library.', error);
+    }
+  }
+
+  return createDefaultLibrary();
+}
+
+function removeActiveGroup() {
+  if (library.groups.length <= 1) {
+    return;
+  }
+
+  if (!confirmDiscardChanges()) {
+    return;
+  }
+
+  const group = getActiveGroup();
+  if (!confirm(`Remove group "${group.name}"?`)) {
+    return;
+  }
+
+  cancelDeleteMode();
+  const groupIndex = library.groups.findIndex((item) => item.id === group.id);
+  library.groups.splice(groupIndex, 1);
+  library.activeGroupId = library.groups[Math.max(0, groupIndex - 1)].id;
+  writeLibraryToStorage();
+  switchToActiveEntry();
+}
+
+function removeActiveEntry() {
+  const group = getActiveGroup();
+
+  if (group.entries.length <= 1) {
+    return;
+  }
+
+  if (!confirmDiscardChanges()) {
+    return;
+  }
+
+  const entry = getActiveEntry();
+  if (!confirm(`Remove entry "${entry.name}"?`)) {
+    return;
+  }
+
+  cancelDeleteMode();
+  const entryIndex = group.entries.findIndex((item) => item.id === entry.id);
+  group.entries.splice(entryIndex, 1);
+  group.activeEntryId = group.entries[Math.max(0, entryIndex - 1)].id;
+  writeLibraryToStorage();
+  switchToActiveEntry();
+}
+
 function setupListeners() {
-  elements.leftEditor.addEventListener('input', queueAutoSave);
-  elements.rightEditor.addEventListener('input', queueAutoSave);
-  
-  elements.leftEditor.addEventListener('keydown', handleTextareaTab);
-  elements.rightEditor.addEventListener('keydown', handleTextareaTab);
-  
+  elements.btnSave.addEventListener('click', saveAllData);
+  elements.groupSelect.addEventListener('change', handleGroupChange);
+  elements.entrySelect.addEventListener('change', handleEntryChange);
+  elements.btnAddGroup.addEventListener('click', addGroup);
+  elements.btnAddEntry.addEventListener('click', addEntry);
+  elements.btnRemoveGroup.addEventListener('click', removeActiveGroup);
+  elements.btnRemoveEntry.addEventListener('click', removeActiveEntry);
+  elements.btnNameCancel.addEventListener('click', closeNameModal);
+  elements.btnNameConfirm.addEventListener('click', confirmNameModal);
+  elements.nameModal.addEventListener('click', (e) => {
+    if (e.target === elements.nameModal) {
+      closeNameModal();
+    }
+  });
+  elements.nameModalInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      confirmNameModal();
+    }
+  });
+  elements.btnAddPanel.addEventListener('click', addPanel);
+  elements.btnDeletePanel.addEventListener('click', beginDeletePanelMode);
+  elements.btnDeleteCancel.addEventListener('click', cancelPendingDelete);
+  elements.btnDeleteConfirm.addEventListener('click', confirmPendingDelete);
+  elements.deleteConfirmModal.addEventListener('click', (e) => {
+    if (e.target === elements.deleteConfirmModal) {
+      cancelPendingDelete();
+    }
+  });
   elements.btnModeEdit.addEventListener('click', () => setViewMode('edit'));
   elements.btnModeRender.addEventListener('click', () => setViewMode('render'));
-  
-  elements.btnResetLayout.addEventListener('click', () => {
-    applySplitPercentage(50);
-  });
-  
+  elements.btnResetLayout.addEventListener('click', resetLayout);
+
   elements.btnClear.addEventListener('click', () => {
     if (confirm('Clear all contents?')) {
       clearAllData();
     }
   });
+
+  document.addEventListener('pointermove', handleDividerPointerMove);
+  document.addEventListener('pointerup', endDividerDrag);
+  document.addEventListener('pointercancel', endDividerDrag);
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      if (!elements.nameModal.classList.contains('hidden')) {
+        closeNameModal();
+      } else if (!elements.deleteConfirmModal.classList.contains('hidden')) {
+        cancelPendingDelete();
+      } else {
+        cancelDeleteMode();
+      }
+    }
+  });
+
+  window.addEventListener('resize', () => applyPaneSizes(false));
 }
 
-// Initialize Empty State
-function loadEmptyState() {
-  elements.leftEditor.value = '';
-  elements.rightEditor.value = '';
-  
-  setViewMode('edit');
-  
-  localStorage.setItem(STORAGE_KEYS.LEFT_TEXT, '');
-  localStorage.setItem(STORAGE_KEYS.RIGHT_TEXT, '');
-  localStorage.setItem(STORAGE_KEYS.VIEW_MODE, 'edit');
-  
-  applySplitPercentage(50);
-  
-  setSaveStatus('saved');
-}
-
-// Clear All Data
-function clearAllData() {
-  elements.leftEditor.value = '';
-  elements.rightEditor.value = '';
-  
-  setViewMode('edit');
-  
-  localStorage.setItem(STORAGE_KEYS.LEFT_TEXT, '');
-  localStorage.setItem(STORAGE_KEYS.RIGHT_TEXT, '');
-  localStorage.setItem(STORAGE_KEYS.VIEW_MODE, 'edit');
-  
-  setSaveStatus('saved');
-}
-
-// Application startup
 function init() {
-  const savedLeft = localStorage.getItem(STORAGE_KEYS.LEFT_TEXT);
-  const savedRight = localStorage.getItem(STORAGE_KEYS.RIGHT_TEXT);
-  const savedViewMode = localStorage.getItem(STORAGE_KEYS.VIEW_MODE);
-  const savedSplit = localStorage.getItem(STORAGE_KEYS.SPLIT_PERCENT);
-  
+  library = loadLibrary();
+  const activeEntry = getActiveEntry();
+  panels = clonePanels(activeEntry.panels);
+  paneSizes = Array.isArray(activeEntry.layout) ? [...activeEntry.layout] : equalPaneSizes(panels.length);
+  viewMode = activeEntry.viewMode === 'render' ? 'render' : 'edit';
+
   setupListeners();
-  setupDragResizer();
-  
-  if (savedLeft === null && savedRight === null) {
-    loadEmptyState();
-  } else {
-    elements.leftEditor.value = savedLeft || '';
-    elements.rightEditor.value = savedRight || '';
-    
-    // Apply split percentage
-    const splitVal = savedSplit ? parseFloat(savedSplit) : 50;
-    applySplitPercentage(splitVal);
-    
-    const modeToSet = savedViewMode === 'render' ? 'render' : 'edit';
-    setViewMode(modeToSet);
-  }
+  renderLibrarySelectors();
+  renderWorkspace();
+  setViewMode(viewMode);
+  setDirty(false);
 }
 
 document.addEventListener('DOMContentLoaded', init);
