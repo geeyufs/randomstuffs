@@ -1,6 +1,7 @@
 const DEFAULT_PANEL_COUNT = 2;
 const BASE_MIN_PANEL_PERCENT = 10;
 const STORAGE_CODEC_KEY = 'comparator-storage-v1';
+const APP_VERSION = window.__COMPARATOR_ASSET_VERSION__ || 'dev';
 
 const STORAGE_KEYS = {
   LIBRARY: 'text_comp_library_v1',
@@ -59,6 +60,7 @@ let scrollSaveTimers = new Map();
 let isRestoringScroll = false;
 let restoreScrollTimer = null;
 let topbarRevealTimer = null;
+let didCheckForUpdate = false;
 
 if (typeof marked !== 'undefined') {
   marked.setOptions({
@@ -171,6 +173,51 @@ function decodeStorageValue(value) {
   } catch (error) {
     console.warn('Unable to decode stored comparator data.', error);
     return null;
+  }
+}
+
+async function clearNamedBrowserCaches() {
+  if (!('caches' in window)) {
+    return;
+  }
+
+  const cacheNames = await caches.keys();
+  await Promise.all(cacheNames.map((cacheName) => caches.delete(cacheName)));
+}
+
+async function checkForAppUpdate() {
+  if (didCheckForUpdate || APP_VERSION === 'dev') {
+    return;
+  }
+
+  didCheckForUpdate = true;
+
+  try {
+    const response = await fetch(`version.json?check=${Date.now()}`, {
+      cache: 'no-store',
+      headers: {
+        'Cache-Control': 'no-cache'
+      }
+    });
+
+    if (!response.ok) {
+      return;
+    }
+
+    const data = await response.json();
+    const latestVersion = typeof data.version === 'string' ? data.version.trim() : '';
+
+    if (!latestVersion || latestVersion === APP_VERSION) {
+      return;
+    }
+
+    await clearNamedBrowserCaches();
+    const url = new URL(window.location.href);
+    url.searchParams.set('appVersion', latestVersion);
+    url.searchParams.set('reload', Date.now().toString(36));
+    window.location.replace(url.toString());
+  } catch (error) {
+    console.warn('Unable to check for app updates.', error);
   }
 }
 
@@ -1454,6 +1501,7 @@ function setupListeners() {
 }
 
 function init() {
+  checkForAppUpdate();
   library = loadLibrary();
   applyUrlLibrarySelection();
   const activeEntry = getActiveEntry();
