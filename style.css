@@ -133,6 +133,88 @@ input {
   padding: 0 26px 0 8px;
 }
 
+.native-library-select {
+  display: none;
+}
+
+.library-dropdown {
+  position: relative;
+  width: 112px;
+}
+
+.library-dropdown-btn {
+  width: 100%;
+  height: 30px;
+  background-color: var(--btn-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-family: var(--sans-font);
+  font-size: 0.78rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 8px;
+  cursor: pointer;
+}
+
+.library-dropdown-btn span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.library-dropdown-btn svg {
+  flex-shrink: 0;
+  color: var(--text-secondary);
+}
+
+.library-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 60;
+  width: max(100%, 180px);
+  max-height: 280px;
+  overflow-y: auto;
+  padding: 4px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background-color: var(--header-bg);
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.34);
+}
+
+.library-dropdown-menu.hidden {
+  display: none;
+}
+
+.library-dropdown-option {
+  display: block;
+  width: 100%;
+  min-height: 28px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: var(--sans-font);
+  font-size: 0.78rem;
+  text-align: left;
+  padding: 6px 8px;
+  cursor: pointer;
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.library-dropdown-option:hover,
+.library-dropdown-option.active {
+  background-color: var(--btn-hover);
+  color: var(--text-primary);
+}
+
 .icon-btn {
   width: 30px;
   height: 30px;
@@ -280,6 +362,8 @@ input {
 .icon-btn:focus-visible,
 .panel-action-btn:focus-visible,
 .library-select:focus-visible,
+.library-dropdown-btn:focus-visible,
+.library-dropdown-option:focus-visible,
 .modal-checkbox input:focus-visible,
 .divider-column:focus-visible {
   outline: 2px solid var(--accent-blue);
@@ -325,7 +409,7 @@ input {
 .panel-actions {
   position: absolute;
   top: 8px;
-  right: 10px;
+  right: 24px;
   z-index: 25;
   display: flex;
   gap: 6px;
@@ -334,8 +418,7 @@ input {
   transition: opacity 0.16s ease;
 }
 
-.pane:hover .panel-actions,
-.pane:focus-within .panel-actions {
+.pane:hover .panel-actions {
   opacity: 1;
   pointer-events: auto;
 }
@@ -738,7 +821,8 @@ input {
     flex-shrink: 0;
   }
 
-  .library-select {
+  .library-select,
+  .library-dropdown {
     min-width: 96px;
     max-width: 122px;
   }

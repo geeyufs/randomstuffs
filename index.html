@@ -25,14 +25,28 @@
           <span>Comparator</span>
         </div>
         <div class="library-controls" aria-label="Saved comparator entries">
-          <select class="library-select" id="group-select" aria-label="Group"></select>
+          <select class="library-select native-library-select" id="group-select" aria-label="Group" tabindex="-1"></select>
+          <div class="library-dropdown" id="group-dropdown">
+            <button class="library-dropdown-btn" id="group-dropdown-button" type="button" aria-haspopup="listbox" aria-expanded="false">
+              <span id="group-dropdown-label"></span>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" width="13" height="13"><path d="m6 9 6 6 6-6"></path></svg>
+            </button>
+            <div class="library-dropdown-menu hidden" id="group-dropdown-menu" role="listbox"></div>
+          </div>
           <button class="icon-btn" id="btn-add-group" type="button" title="Add Group" aria-label="Add group">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="13" height="13"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
           </button>
           <button class="icon-btn" id="btn-remove-group" type="button" title="Remove Group" aria-label="Remove group">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="13" height="13"><line x1="5" y1="12" x2="19" y2="12"></line></svg>
           </button>
-          <select class="library-select" id="entry-select" aria-label="Entry"></select>
+          <select class="library-select native-library-select" id="entry-select" aria-label="Entry" tabindex="-1"></select>
+          <div class="library-dropdown" id="entry-dropdown">
+            <button class="library-dropdown-btn" id="entry-dropdown-button" type="button" aria-haspopup="listbox" aria-expanded="false">
+              <span id="entry-dropdown-label"></span>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" width="13" height="13"><path d="m6 9 6 6 6-6"></path></svg>
+            </button>
+            <div class="library-dropdown-menu hidden" id="entry-dropdown-menu" role="listbox"></div>
+          </div>
           <button class="icon-btn" id="btn-add-entry" type="button" title="Add Entry" aria-label="Add entry">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="13" height="13"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
           </button>
@@ -70,7 +84,7 @@
         </button>
         <button class="header-btn" id="btn-clear" title="Clear Editor Contents">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
-          Clear
+          Clear All
         </button>
       </div>
     </header>

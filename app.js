@@ -12,6 +12,14 @@ const elements = {
   workspace: document.querySelector('.workspace'),
   groupSelect: document.getElementById('group-select'),
   entrySelect: document.getElementById('entry-select'),
+  groupDropdown: document.getElementById('group-dropdown'),
+  entryDropdown: document.getElementById('entry-dropdown'),
+  groupDropdownButton: document.getElementById('group-dropdown-button'),
+  entryDropdownButton: document.getElementById('entry-dropdown-button'),
+  groupDropdownLabel: document.getElementById('group-dropdown-label'),
+  entryDropdownLabel: document.getElementById('entry-dropdown-label'),
+  groupDropdownMenu: document.getElementById('group-dropdown-menu'),
+  entryDropdownMenu: document.getElementById('entry-dropdown-menu'),
   btnAddGroup: document.getElementById('btn-add-group'),
   btnAddEntry: document.getElementById('btn-add-entry'),
   btnRemoveGroup: document.getElementById('btn-remove-group'),
@@ -935,6 +943,7 @@ function renderLibrarySelectors() {
   elements.entrySelect.value = activeGroup.activeEntryId;
   elements.btnRemoveGroup.disabled = library.groups.length <= 1;
   elements.btnRemoveEntry.disabled = activeGroup.entries.length <= 1;
+  renderLibraryDropdowns(activeGroup);
 }
 
 function escapeOptionText(value) {
@@ -943,6 +952,117 @@ function escapeOptionText(value) {
     .replaceAll('<', '&lt;')
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;');
+}
+
+function getLibraryDropdownElements(kind) {
+  return kind === 'group'
+    ? {
+      dropdown: elements.groupDropdown,
+      button: elements.groupDropdownButton,
+      label: elements.groupDropdownLabel,
+      menu: elements.groupDropdownMenu
+    }
+    : {
+      dropdown: elements.entryDropdown,
+      button: elements.entryDropdownButton,
+      label: elements.entryDropdownLabel,
+      menu: elements.entryDropdownMenu
+    };
+}
+
+function setLibraryDropdownOpen(kind, open) {
+  const dropdown = getLibraryDropdownElements(kind);
+  dropdown.menu.classList.toggle('hidden', !open);
+  dropdown.button.setAttribute('aria-expanded', open ? 'true' : 'false');
+}
+
+function closeAllLibraryDropdowns() {
+  setLibraryDropdownOpen('group', false);
+  setLibraryDropdownOpen('entry', false);
+}
+
+function isAnyLibraryDropdownOpen() {
+  return !elements.groupDropdownMenu.classList.contains('hidden')
+    || !elements.entryDropdownMenu.classList.contains('hidden');
+}
+
+function toggleLibraryDropdown(kind) {
+  const dropdown = getLibraryDropdownElements(kind);
+  const shouldOpen = dropdown.menu.classList.contains('hidden');
+  closeAllLibraryDropdowns();
+  setLibraryDropdownOpen(kind, shouldOpen);
+}
+
+function getLibraryTargetUrl(groupId, entryId) {
+  const url = new URL(window.location.href);
+  url.searchParams.set('group', groupId);
+  url.searchParams.set('entry', entryId);
+  return url.toString();
+}
+
+function selectLibraryDropdownOption(option) {
+  closeAllLibraryDropdowns();
+
+  if (option.dataset.kind === 'group') {
+    elements.groupSelect.value = option.dataset.groupId;
+    handleGroupChange();
+  } else if (option.dataset.kind === 'entry') {
+    elements.entrySelect.value = option.dataset.entryId;
+    handleEntryChange();
+  }
+
+  renderLibrarySelectors();
+}
+
+function handleLibraryOptionClick(e) {
+  const option = e.target.closest('.library-dropdown-option');
+
+  if (!option) {
+    return;
+  }
+
+  e.preventDefault();
+  selectLibraryDropdownOption(option);
+}
+
+function handleLibraryOptionKeydown(e) {
+  const option = e.target.closest('.library-dropdown-option');
+
+  if (!option) {
+    return;
+  }
+
+  if (e.key === 'Enter' || e.key === ' ') {
+    e.preventDefault();
+    selectLibraryDropdownOption(option);
+  } else if (e.key === 'Escape') {
+    closeAllLibraryDropdowns();
+  }
+}
+
+function renderLibraryDropdowns(activeGroup) {
+  const activeEntry = activeGroup.entries.find((entry) => entry.id === activeGroup.activeEntryId) || activeGroup.entries[0];
+
+  elements.groupDropdownLabel.textContent = activeGroup.name;
+  elements.entryDropdownLabel.textContent = activeEntry.name;
+  elements.groupDropdownButton.title = activeGroup.name;
+  elements.entryDropdownButton.title = activeEntry.name;
+
+  elements.groupDropdownMenu.innerHTML = library.groups
+    .map((group) => {
+      const isActive = group.id === activeGroup.id;
+      const href = getLibraryTargetUrl(group.id, group.activeEntryId);
+      return `<a class="library-dropdown-option${isActive ? ' active' : ''}" href="${escapeOptionText(href)}" target="_blank" rel="noopener" role="option" tabindex="0" aria-selected="${isActive ? 'true' : 'false'}" data-kind="group" data-group-id="${escapeOptionText(group.id)}" data-entry-id="${escapeOptionText(group.activeEntryId)}">${escapeOptionText(group.name)}</a>`;
+    })
+    .join('');
+
+  elements.entryDropdownMenu.innerHTML = activeGroup.entries
+    .map((entry) => {
+      const isActive = entry.id === activeEntry.id;
+      const href = getLibraryTargetUrl(activeGroup.id, entry.id);
+      return `<a class="library-dropdown-option${isActive ? ' active' : ''}" href="${escapeOptionText(href)}" target="_blank" rel="noopener" role="option" tabindex="0" aria-selected="${isActive ? 'true' : 'false'}" data-kind="entry" data-group-id="${escapeOptionText(activeGroup.id)}" data-entry-id="${escapeOptionText(entry.id)}">${escapeOptionText(entry.name)}</a>`;
+    })
+    .join('');
 }
 
 function confirmDiscardChanges() {
@@ -1077,6 +1197,28 @@ function loadLibrary() {
   return createDefaultLibrary();
 }
 
+function applyUrlLibrarySelection() {
+  const params = new URLSearchParams(window.location.search);
+  const groupId = params.get('group');
+  const entryId = params.get('entry');
+
+  if (!groupId) {
+    return;
+  }
+
+  const group = library.groups.find((item) => item.id === groupId);
+
+  if (!group) {
+    return;
+  }
+
+  library.activeGroupId = group.id;
+
+  if (entryId && group.entries.some((entry) => entry.id === entryId)) {
+    group.activeEntryId = entryId;
+  }
+}
+
 function removeActiveGroup() {
   if (library.groups.length <= 1) {
     return;
@@ -1127,6 +1269,18 @@ function setupListeners() {
   elements.btnSave.addEventListener('click', saveAllData);
   elements.groupSelect.addEventListener('change', handleGroupChange);
   elements.entrySelect.addEventListener('change', handleEntryChange);
+  elements.groupDropdownButton.addEventListener('click', (e) => {
+    e.stopPropagation();
+    toggleLibraryDropdown('group');
+  });
+  elements.entryDropdownButton.addEventListener('click', (e) => {
+    e.stopPropagation();
+    toggleLibraryDropdown('entry');
+  });
+  [elements.groupDropdownMenu, elements.entryDropdownMenu].forEach((menu) => {
+    menu.addEventListener('click', handleLibraryOptionClick);
+    menu.addEventListener('keydown', handleLibraryOptionKeydown);
+  });
   elements.btnAddGroup.addEventListener('click', addGroup);
   elements.btnAddEntry.addEventListener('click', addEntry);
   elements.btnRemoveGroup.addEventListener('click', removeActiveGroup);
@@ -1166,9 +1320,16 @@ function setupListeners() {
   document.addEventListener('pointermove', handleDividerPointerMove);
   document.addEventListener('pointerup', endDividerDrag);
   document.addEventListener('pointercancel', endDividerDrag);
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('.library-dropdown')) {
+      closeAllLibraryDropdowns();
+    }
+  });
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
-      if (!elements.nameModal.classList.contains('hidden')) {
+      if (isAnyLibraryDropdownOpen()) {
+        closeAllLibraryDropdowns();
+      } else if (!elements.nameModal.classList.contains('hidden')) {
         closeNameModal();
       } else if (!elements.deleteConfirmModal.classList.contains('hidden')) {
         cancelPendingDelete();
@@ -1183,6 +1344,7 @@ function setupListeners() {
 
 function init() {
   library = loadLibrary();
+  applyUrlLibrarySelection();
   const activeEntry = getActiveEntry();
   panels = clonePanels(activeEntry.panels);
   paneSizes = Array.isArray(activeEntry.layout) ? [...activeEntry.layout] : equalPaneSizes(panels.length);
