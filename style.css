@@ -805,8 +805,8 @@ input {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
     grid-template-areas:
-      "left center"
-      "right right";
+      "left left"
+      "center right";
     height: auto;
     min-height: var(--header-height);
     gap: 8px 12px;
@@ -822,7 +822,7 @@ input {
 
   .header-center {
     grid-area: center;
-    justify-self: end;
+    justify-self: start;
   }
 
   .header-right {
@@ -830,16 +830,6 @@ input {
     justify-self: end;
     flex-wrap: nowrap;
     gap: 8px;
-  }
-
-  .two-panel .app-header {
-    grid-template-areas:
-      "left left"
-      "center right";
-  }
-
-  .two-panel .header-center {
-    justify-self: start;
   }
 }
 
