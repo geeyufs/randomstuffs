@@ -368,12 +368,18 @@ function usesMobileTopbarReveal() {
   return window.matchMedia('(hover: none), (pointer: coarse), (max-width: 768px)').matches;
 }
 
+function canAutoHideTopbar() {
+  return viewMode === 'render' && panels.length > 1 && window.matchMedia('(max-width: 1180px)').matches;
+}
+
 function updatePanelLayoutClasses() {
   const isMultiPanel = panels.length > 1;
+  const shouldAutoHideTopbar = canAutoHideTopbar();
   elements.appContainer.classList.toggle('multi-panel', isMultiPanel);
   elements.appContainer.classList.toggle('two-panel', panels.length === 2);
+  elements.appContainer.classList.toggle('topbar-auto-hide', shouldAutoHideTopbar);
 
-  if (!isMultiPanel) {
+  if (!shouldAutoHideTopbar) {
     clearTimeout(topbarRevealTimer);
     elements.appContainer.classList.remove('topbar-revealed');
   }
@@ -382,7 +388,7 @@ function updatePanelLayoutClasses() {
 function hideTopbar() {
   clearTimeout(topbarRevealTimer);
 
-  if (panels.length > 1) {
+  if (canAutoHideTopbar()) {
     elements.appContainer.classList.remove('topbar-revealed');
   }
 }
@@ -393,7 +399,7 @@ function scheduleTopbarHide(delay = 600) {
 }
 
 function showTopbar({ temporary = false } = {}) {
-  if (panels.length <= 1) {
+  if (!canAutoHideTopbar()) {
     return;
   }
 
@@ -412,7 +418,7 @@ function showTopbarOnPanelScroll() {
 }
 
 function handleTopbarPointerMove(e) {
-  if (usesMobileTopbarReveal() || panels.length <= 1) {
+  if (usesMobileTopbarReveal() || !canAutoHideTopbar()) {
     return;
   }
 
@@ -737,6 +743,7 @@ function cancelPendingDelete() {
 
 function setViewMode(mode) {
   viewMode = mode === 'render' ? 'render' : 'edit';
+  updatePanelLayoutClasses();
 
   if (viewMode === 'render') {
     cancelDeleteMode();
@@ -1437,6 +1444,7 @@ function setupListeners() {
   });
 
   window.addEventListener('resize', () => {
+    updatePanelLayoutClasses();
     applyPaneSizes(false);
 
     if (usesMobileTopbarReveal()) {

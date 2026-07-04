@@ -79,7 +79,7 @@ input {
   display: none;
 }
 
-.multi-panel .topbar-reveal-zone {
+.topbar-auto-hide .topbar-reveal-zone {
   display: block;
   position: fixed;
   top: 0;
@@ -90,12 +90,12 @@ input {
 }
 
 @media (hover: none), (pointer: coarse), (max-width: 768px) {
-  .multi-panel .topbar-reveal-zone {
+  .topbar-auto-hide .topbar-reveal-zone {
     display: none;
   }
 }
 
-.multi-panel .app-header {
+.topbar-auto-hide .app-header {
   position: fixed;
   top: 0;
   left: 0;
@@ -104,16 +104,16 @@ input {
   box-shadow: 0 12px 28px rgba(0, 0, 0, 0);
 }
 
-.multi-panel.topbar-revealed .app-header {
+.topbar-auto-hide.topbar-revealed .app-header {
   transform: translateY(0);
   box-shadow: 0 12px 28px rgba(0, 0, 0, 0.28);
 }
 
-.multi-panel:not(.topbar-revealed) .app-header {
+.topbar-auto-hide:not(.topbar-revealed) .app-header {
   pointer-events: none;
 }
 
-.multi-panel .workspace {
+.topbar-auto-hide .workspace {
   flex: 1 1 auto;
 }
 
