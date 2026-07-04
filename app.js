@@ -9,6 +9,8 @@ const STORAGE_KEYS = {
 
 const elements = {
   appContainer: document.getElementById('app-container'),
+  topbarRevealZone: document.getElementById('topbar-reveal-zone'),
+  appHeader: document.querySelector('.app-header'),
   workspace: document.querySelector('.workspace'),
   groupSelect: document.getElementById('group-select'),
   entrySelect: document.getElementById('entry-select'),
@@ -56,6 +58,7 @@ let pendingNameMode = null;
 let scrollSaveTimers = new Map();
 let isRestoringScroll = false;
 let restoreScrollTimer = null;
+let topbarRevealTimer = null;
 
 if (typeof marked !== 'undefined') {
   marked.setOptions({
@@ -361,6 +364,74 @@ function persistTransientPanelState(dirtyOnStart) {
   triggerSaveButton();
 }
 
+function usesMobileTopbarReveal() {
+  return window.matchMedia('(hover: none), (pointer: coarse), (max-width: 768px)').matches;
+}
+
+function updatePanelLayoutClasses() {
+  const isMultiPanel = panels.length > 1;
+  elements.appContainer.classList.toggle('multi-panel', isMultiPanel);
+  elements.appContainer.classList.toggle('two-panel', panels.length === 2);
+
+  if (!isMultiPanel) {
+    clearTimeout(topbarRevealTimer);
+    elements.appContainer.classList.remove('topbar-revealed');
+  }
+}
+
+function hideTopbar() {
+  clearTimeout(topbarRevealTimer);
+
+  if (panels.length > 1) {
+    elements.appContainer.classList.remove('topbar-revealed');
+  }
+}
+
+function scheduleTopbarHide(delay = 600) {
+  clearTimeout(topbarRevealTimer);
+  topbarRevealTimer = setTimeout(hideTopbar, delay);
+}
+
+function showTopbar({ temporary = false } = {}) {
+  if (panels.length <= 1) {
+    return;
+  }
+
+  clearTimeout(topbarRevealTimer);
+  elements.appContainer.classList.add('topbar-revealed');
+
+  if (temporary) {
+    scheduleTopbarHide(1800);
+  }
+}
+
+function showTopbarOnPanelScroll() {
+  if (usesMobileTopbarReveal()) {
+    showTopbar({ temporary: true });
+  }
+}
+
+function handleTopbarPointerMove(e) {
+  if (usesMobileTopbarReveal() || panels.length <= 1) {
+    return;
+  }
+
+  if (e.clientY <= 22) {
+    showTopbar();
+    return;
+  }
+
+  if (!elements.appContainer.classList.contains('topbar-revealed')) {
+    return;
+  }
+
+  const headerRect = elements.appHeader.getBoundingClientRect();
+
+  if (e.clientY > headerRect.bottom + 8) {
+    scheduleTopbarHide(250);
+  }
+}
+
 function saveLayout() {
   setDirty(true);
 }
@@ -502,6 +573,8 @@ function schedulePanelScrollSave(panelId, source, scrollTop) {
     return;
   }
 
+  showTopbarOnPanelScroll();
+
   const existingTimer = scrollSaveTimers.get(panelId);
   const dirtyOnStart = existingTimer ? existingTimer.dirtyOnStart : isDirty;
 
@@ -601,6 +674,8 @@ function createDividerMarkup(index) {
 }
 
 function renderWorkspace() {
+  updatePanelLayoutClasses();
+
   const markup = panels
     .map((panel, index) => {
       const divider = index < panels.length - 1 ? createDividerMarkup(index) : '';
@@ -1317,6 +1392,28 @@ function setupListeners() {
     }
   });
 
+  elements.topbarRevealZone.addEventListener('pointerenter', () => {
+    if (!usesMobileTopbarReveal()) {
+      showTopbar();
+    }
+  });
+  elements.topbarRevealZone.addEventListener('pointerleave', () => {
+    if (!usesMobileTopbarReveal()) {
+      scheduleTopbarHide(350);
+    }
+  });
+  elements.appHeader.addEventListener('pointerenter', () => {
+    if (!usesMobileTopbarReveal()) {
+      showTopbar();
+    }
+  });
+  elements.appHeader.addEventListener('pointerleave', () => {
+    if (!usesMobileTopbarReveal()) {
+      hideTopbar();
+    }
+  });
+
+  document.addEventListener('pointermove', handleTopbarPointerMove);
   document.addEventListener('pointermove', handleDividerPointerMove);
   document.addEventListener('pointerup', endDividerDrag);
   document.addEventListener('pointercancel', endDividerDrag);
@@ -1339,7 +1436,13 @@ function setupListeners() {
     }
   });
 
-  window.addEventListener('resize', () => applyPaneSizes(false));
+  window.addEventListener('resize', () => {
+    applyPaneSizes(false);
+
+    if (usesMobileTopbarReveal()) {
+      hideTopbar();
+    }
+  });
 }
 
 function init() {
