@@ -61,6 +61,7 @@ let isRestoringScroll = false;
 let restoreScrollTimer = null;
 let topbarRevealTimer = null;
 let didCheckForUpdate = false;
+let lastActiveElementBeforeModal = null;
 
 if (typeof marked !== 'undefined') {
   marked.setOptions({
@@ -313,7 +314,72 @@ function captureCurrentEntryState() {
   };
 }
 
+function safeSetLocalStorageItem(key, value) {
+  try {
+    localStorage.setItem(key, value);
+    return true;
+  } catch (error) {
+    console.warn(`Unable to write '${key}' to localStorage.`, error);
+    return false;
+  }
+}
+
+function safeGetLocalStorageItem(key) {
+  try {
+    return localStorage.getItem(key);
+  } catch (error) {
+    console.warn(`Unable to read '${key}' from localStorage.`, error);
+    return null;
+  }
+}
+
+function clearAllScrollSaveTimers() {
+  scrollSaveTimers.forEach((timer) => clearTimeout(timer.id));
+  scrollSaveTimers.clear();
+}
+
+function saveFocusBeforeModal() {
+  lastActiveElementBeforeModal = document.activeElement;
+}
+
+function restoreFocusAfterModal() {
+  if (lastActiveElementBeforeModal && document.body.contains(lastActiveElementBeforeModal) && typeof lastActiveElementBeforeModal.focus === 'function') {
+    lastActiveElementBeforeModal.focus();
+  }
+  lastActiveElementBeforeModal = null;
+}
+
+function handleModalFocusTrap(e, modalContainer) {
+  if (e.key !== 'Tab') {
+    return;
+  }
+
+  const focusables = Array.from(
+    modalContainer.querySelectorAll('button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])')
+  );
+
+  if (!focusables.length) {
+    return;
+  }
+
+  const first = focusables[0];
+  const last = focusables[focusables.length - 1];
+
+  if (e.shiftKey) {
+    if (document.activeElement === first || !modalContainer.contains(document.activeElement)) {
+      e.preventDefault();
+      last.focus();
+    }
+  } else {
+    if (document.activeElement === last || !modalContainer.contains(document.activeElement)) {
+      e.preventDefault();
+      first.focus();
+    }
+  }
+}
+
 function applyEntry(entry) {
+  clearAllScrollSaveTimers();
   panels = clonePanels(entry.panels);
   paneSizes = Array.isArray(entry.layout) ? [...entry.layout] : equalPaneSizes(panels.length);
   viewMode = entry.viewMode === 'render' ? 'render' : 'edit';
@@ -324,7 +390,7 @@ function applyEntry(entry) {
 }
 
 function writeLibraryToStorage() {
-  localStorage.setItem(STORAGE_KEYS.LIBRARY, encodeStorageValue(JSON.stringify(library)));
+  safeSetLocalStorageItem(STORAGE_KEYS.LIBRARY, encodeStorageValue(JSON.stringify(library)));
 }
 
 function collectPanelValues({ preserveRenderScroll = false } = {}) {
@@ -416,7 +482,7 @@ function usesMobileTopbarReveal() {
 }
 
 function canAutoHideTopbar() {
-  return viewMode === 'render' && panels.length > 1 && window.matchMedia('(max-width: 1180px)').matches;
+  return viewMode === 'render' && window.matchMedia('(max-width: 1180px)').matches;
 }
 
 function updatePanelLayoutClasses() {
@@ -781,6 +847,7 @@ function closeDeleteConfirmModal() {
   pendingDeletePanelId = null;
   elements.deleteConfirmModal.classList.add('hidden');
   elements.deleteConfirmSkip.checked = false;
+  restoreFocusAfterModal();
 }
 
 function cancelPendingDelete() {
@@ -885,13 +952,15 @@ function handleDeletePanelClick(e) {
     return;
   }
 
-  if (localStorage.getItem(STORAGE_KEYS.SKIP_DELETE_CONFIRM) === 'true') {
+  if (safeGetLocalStorageItem(STORAGE_KEYS.SKIP_DELETE_CONFIRM) === 'true') {
     deletePanelById(panelId);
     return;
   }
 
+  saveFocusBeforeModal();
   pendingDeletePanelId = panelId;
   elements.deleteConfirmModal.classList.remove('hidden');
+  elements.btnDeleteCancel.focus();
 }
 
 function deletePanelById(panelId) {
@@ -920,7 +989,7 @@ function confirmPendingDelete() {
   }
 
   if (elements.deleteConfirmSkip.checked) {
-    localStorage.setItem(STORAGE_KEYS.SKIP_DELETE_CONFIRM, 'true');
+    safeSetLocalStorageItem(STORAGE_KEYS.SKIP_DELETE_CONFIRM, 'true');
   }
 
   const panelId = pendingDeletePanelId;
@@ -1249,6 +1318,7 @@ function openNameModal(mode) {
     return;
   }
 
+  saveFocusBeforeModal();
   pendingNameMode = mode;
   elements.nameModalTitle.textContent = mode === 'group' ? 'New group' : 'New entry';
   elements.nameModalLabel.textContent = mode === 'group' ? 'Group name' : 'Entry name';
@@ -1261,6 +1331,7 @@ function closeNameModal() {
   pendingNameMode = null;
   elements.nameModal.classList.add('hidden');
   elements.nameModalInput.value = '';
+  restoreFocusAfterModal();
 }
 
 function confirmNameModal() {
@@ -1308,7 +1379,7 @@ function createNamedEntry(name) {
 }
 
 function loadLibrary() {
-  const savedLibrary = decodeStorageValue(localStorage.getItem(STORAGE_KEYS.LIBRARY));
+  const savedLibrary = decodeStorageValue(safeGetLocalStorageItem(STORAGE_KEYS.LIBRARY));
 
   if (savedLibrary) {
     try {
@@ -1435,6 +1506,12 @@ function setupListeners() {
     if (e.target === elements.deleteConfirmModal) {
       cancelPendingDelete();
     }
+  });
+  elements.deleteConfirmModal.addEventListener('keydown', (e) => {
+    handleModalFocusTrap(e, elements.deleteConfirmModal);
+  });
+  elements.nameModal.addEventListener('keydown', (e) => {
+    handleModalFocusTrap(e, elements.nameModal);
   });
   elements.btnModeEdit.addEventListener('click', () => setViewMode('edit'));
   elements.btnModeRender.addEventListener('click', () => setViewMode('render'));
