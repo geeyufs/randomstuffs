@@ -5,7 +5,8 @@ const APP_VERSION = window.__COMPARATOR_ASSET_VERSION__ || 'dev';
 
 const STORAGE_KEYS = {
   LIBRARY: 'text_comp_library_v1',
-  SKIP_DELETE_CONFIRM: 'text_comp_skip_delete_confirm'
+  SKIP_DELETE_CONFIRM: 'text_comp_skip_delete_confirm',
+  APP_SCRIPT_HASH: 'text_comp_app_script_hash_v1'
 };
 
 const elements = {
@@ -186,6 +187,65 @@ async function clearNamedBrowserCaches() {
   await Promise.all(cacheNames.map((cacheName) => caches.delete(cacheName)));
 }
 
+async function hashText(value) {
+  if (typeof crypto !== 'undefined' && crypto.subtle && typeof TextEncoder !== 'undefined') {
+    const bytes = new TextEncoder().encode(value);
+    const digest = await crypto.subtle.digest('SHA-256', bytes);
+    return Array.from(new Uint8Array(digest))
+      .map((byte) => byte.toString(16).padStart(2, '0'))
+      .join('');
+  }
+
+  let hash = 0;
+
+  for (let i = 0; i < value.length; i += 1) {
+    hash = ((hash << 5) - hash + value.charCodeAt(i)) | 0;
+  }
+
+  return `fallback-${Math.abs(hash).toString(16)}`;
+}
+
+async function fetchLatestAppScriptHash() {
+  const response = await fetch(`app.js?check=${Date.now()}`, {
+    cache: 'no-store',
+    headers: {
+      'Cache-Control': 'no-cache'
+    }
+  });
+
+  if (!response.ok) {
+    return null;
+  }
+
+  return hashText(await response.text());
+}
+
+async function reloadWithFreshAssets(assetReloadValue) {
+  await clearNamedBrowserCaches();
+  const url = new URL(window.location.href);
+  url.searchParams.set('assetReload', assetReloadValue);
+  url.searchParams.set('reload', Date.now().toString(36));
+  window.location.replace(url.toString());
+}
+
+async function checkForAppScriptUpdate() {
+  const latestHash = await fetchLatestAppScriptHash();
+
+  if (!latestHash) {
+    return false;
+  }
+
+  const storedHash = safeGetLocalStorageItem(STORAGE_KEYS.APP_SCRIPT_HASH);
+  safeSetLocalStorageItem(STORAGE_KEYS.APP_SCRIPT_HASH, latestHash);
+
+  if (!storedHash || storedHash === latestHash) {
+    return false;
+  }
+
+  await reloadWithFreshAssets(latestHash.slice(0, 16));
+  return true;
+}
+
 async function checkForAppUpdate() {
   if (didCheckForUpdate || APP_VERSION === 'dev') {
     return;
@@ -194,6 +254,10 @@ async function checkForAppUpdate() {
   didCheckForUpdate = true;
 
   try {
+    if (await checkForAppScriptUpdate()) {
+      return;
+    }
+
     const response = await fetch(`version.json?check=${Date.now()}`, {
       cache: 'no-store',
       headers: {
@@ -212,11 +276,7 @@ async function checkForAppUpdate() {
       return;
     }
 
-    await clearNamedBrowserCaches();
-    const url = new URL(window.location.href);
-    url.searchParams.set('appVersion', latestVersion);
-    url.searchParams.set('reload', Date.now().toString(36));
-    window.location.replace(url.toString());
+    await reloadWithFreshAssets(latestVersion);
   } catch (error) {
     console.warn('Unable to check for app updates.', error);
   }
@@ -338,6 +398,23 @@ function clearAllScrollSaveTimers() {
   scrollSaveTimers.clear();
 }
 
+function flushPendingScrollSaves() {
+  const timers = Array.from(scrollSaveTimers.values());
+
+  if (!timers.length) {
+    return true;
+  }
+
+  clearAllScrollSaveTimers();
+
+  if (timers.some((timer) => timer.dirtyOnStart) || isDirty) {
+    setDirty(true);
+    return true;
+  }
+
+  return saveAllData();
+}
+
 function saveFocusBeforeModal() {
   lastActiveElementBeforeModal = document.activeElement;
 }
@@ -390,7 +467,7 @@ function applyEntry(entry) {
 }
 
 function writeLibraryToStorage() {
-  safeSetLocalStorageItem(STORAGE_KEYS.LIBRARY, encodeStorageValue(JSON.stringify(library)));
+  return safeSetLocalStorageItem(STORAGE_KEYS.LIBRARY, encodeStorageValue(JSON.stringify(library)));
 }
 
 function collectPanelValues({ preserveRenderScroll = false } = {}) {
@@ -455,12 +532,17 @@ function writeCurrentEntry() {
   entry.panels = state.panels;
   entry.layout = state.layout;
   entry.viewMode = state.viewMode;
-  writeLibraryToStorage();
+  return writeLibraryToStorage();
 }
 
 function saveAllData() {
-  writeCurrentEntry();
-  setDirty(false);
+  if (writeCurrentEntry()) {
+    setDirty(false);
+    return true;
+  }
+
+  setDirty(true);
+  return false;
 }
 
 function triggerSaveButton() {
@@ -709,6 +791,23 @@ function schedulePanelScrollSave(panelId, source, scrollTop) {
   scrollSaveTimers.set(panelId, { id, dirtyOnStart });
 }
 
+function handleTextareaPaste(e) {
+  const textarea = e.target;
+  const pane = textarea.closest('.pane');
+  const panelId = pane ? pane.dataset.panelId : null;
+
+  if (!panelId) {
+    return;
+  }
+
+  requestAnimationFrame(() => {
+    textarea.selectionStart = 0;
+    textarea.selectionEnd = 0;
+    textarea.scrollTop = 0;
+    updatePanelScroll(panelId, 'editor', 0);
+  });
+}
+
 async function copyPanelById(panelId) {
   collectPanelValues();
   const panel = panels.find((item) => item.id === panelId);
@@ -811,6 +910,7 @@ function renderWorkspace() {
     textarea.value = panel.text;
     textarea.addEventListener('input', () => setDirty(true));
     textarea.addEventListener('keydown', handleTextareaTab);
+    textarea.addEventListener('paste', handleTextareaPaste);
     textarea.addEventListener('scroll', () => schedulePanelScrollSave(panel.id, 'editor', textarea.scrollTop));
     renderedView.addEventListener('scroll', () => schedulePanelScrollSave(panel.id, 'render', renderedView.scrollTop));
     pane.querySelectorAll('.panel-action-btn').forEach((button) => {
@@ -1129,6 +1229,7 @@ function clearAllData() {
 
 function renderLibrarySelectors() {
   const activeGroup = getActiveGroup();
+  const activeEntry = activeGroup.entries.find((entry) => entry.id === activeGroup.activeEntryId) || activeGroup.entries[0];
 
   elements.groupSelect.innerHTML = library.groups
     .map((group) => `<option value="${group.id}">${escapeOptionText(group.name)}</option>`)
@@ -1141,7 +1242,12 @@ function renderLibrarySelectors() {
   elements.entrySelect.value = activeGroup.activeEntryId;
   elements.btnRemoveGroup.disabled = library.groups.length <= 1;
   elements.btnRemoveEntry.disabled = activeGroup.entries.length <= 1;
+  updateDocumentTitle(activeGroup, activeEntry);
   renderLibraryDropdowns(activeGroup);
+}
+
+function updateDocumentTitle(group, entry) {
+  document.title = `${group.name} / ${entry.name} - Comparator`;
 }
 
 function escapeOptionText(value) {
@@ -1275,6 +1381,8 @@ function switchToActiveEntry() {
 function handleGroupChange() {
   const previousGroupId = library.activeGroupId;
 
+  flushPendingScrollSaves();
+
   if (!confirmDiscardChanges()) {
     elements.groupSelect.value = previousGroupId;
     return;
@@ -1296,6 +1404,8 @@ function handleEntryChange() {
   const group = getActiveGroup();
   const previousEntryId = group.activeEntryId;
 
+  flushPendingScrollSaves();
+
   if (!confirmDiscardChanges()) {
     elements.entrySelect.value = previousEntryId;
     return;
@@ -1314,6 +1424,8 @@ function handleEntryChange() {
 }
 
 function openNameModal(mode) {
+  flushPendingScrollSaves();
+
   if (!confirmDiscardChanges()) {
     return;
   }
@@ -1424,6 +1536,8 @@ function removeActiveGroup() {
     return;
   }
 
+  flushPendingScrollSaves();
+
   if (!confirmDiscardChanges()) {
     return;
   }
@@ -1447,6 +1561,8 @@ function removeActiveEntry() {
   if (group.entries.length <= 1) {
     return;
   }
+
+  flushPendingScrollSaves();
 
   if (!confirmDiscardChanges()) {
     return;
