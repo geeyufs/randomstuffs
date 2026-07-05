@@ -1349,6 +1349,7 @@ function getLibraryDropdownElements(kind) {
 
 function setLibraryDropdownOpen(kind, open) {
   const dropdown = getLibraryDropdownElements(kind);
+  dropdown.dropdown.classList.toggle('open', open);
   dropdown.menu.classList.toggle('hidden', !open);
   dropdown.button.setAttribute('aria-expanded', open ? 'true' : 'false');
 
