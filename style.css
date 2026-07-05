@@ -817,7 +817,7 @@ input {
     grid-area: left;
     justify-self: start;
     max-width: 100%;
-    overflow: hidden;
+    overflow: visible;
   }
 
   .header-center {
