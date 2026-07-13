@@ -1,5 +1,7 @@
 const DEFAULT_PANEL_COUNT = 2;
 const BASE_MIN_PANEL_PERCENT = 10;
+const PANEL_TYPE_TEXT = 'text';
+const PANEL_TYPE_IMAGES = 'images';
 const STORAGE_CODEC_KEY = 'comparator-storage-v1';
 const APP_VERSION = window.__COMPARATOR_ASSET_VERSION__ || 'dev';
 
@@ -33,6 +35,7 @@ const elements = {
   btnSave: document.getElementById('btn-save'),
   btnSaveText: document.querySelector('.save-btn-text'),
   btnAddPanel: document.getElementById('btn-add-panel'),
+  btnAddImagePanel: document.getElementById('btn-add-image-panel'),
   btnDeletePanel: document.getElementById('btn-delete-panel'),
   btnResetLayout: document.getElementById('btn-reset-layout'),
   btnClear: document.getElementById('btn-clear'),
@@ -79,13 +82,18 @@ function createPanelId() {
   return `panel-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-function createEmptyPanels(count = DEFAULT_PANEL_COUNT) {
-  return Array.from({ length: count }, () => ({
+function createPanel(type = PANEL_TYPE_TEXT) {
+  return {
     id: createPanelId(),
+    type: type === PANEL_TYPE_IMAGES ? PANEL_TYPE_IMAGES : PANEL_TYPE_TEXT,
     text: '',
     editorScrollTop: 0,
     renderScrollTop: 0
-  }));
+  };
+}
+
+function createEmptyPanels(count = DEFAULT_PANEL_COUNT) {
+  return Array.from({ length: count }, () => createPanel());
 }
 
 function clonePanels(value) {
@@ -291,6 +299,7 @@ function normalizePanels(value) {
     .filter((panel) => panel && typeof panel === 'object')
     .map((panel) => ({
       id: typeof panel.id === 'string' && panel.id ? panel.id : createPanelId(),
+      type: panel.type === PANEL_TYPE_IMAGES ? PANEL_TYPE_IMAGES : PANEL_TYPE_TEXT,
       text: typeof panel.text === 'string' ? panel.text : '',
       editorScrollTop: Number.isFinite(Number(panel.editorScrollTop)) ? Math.max(0, Number(panel.editorScrollTop)) : 0,
       renderScrollTop: Number.isFinite(Number(panel.renderScrollTop)) ? Math.max(0, Number(panel.renderScrollTop)) : 0
@@ -569,15 +578,151 @@ function renderMarkdown(markdown, target) {
   target.innerHTML = DOMPurify.sanitize(parsed, { USE_PROFILES: { html: true } });
 }
 
+function parseImagePanelText(text) {
+  const urls = [];
+  const invalidLines = [];
+
+  text.split(/\r?\n/).forEach((rawValue, index) => {
+    const value = rawValue.trim();
+
+    if (!value) {
+      return;
+    }
+
+    try {
+      const url = new URL(value);
+
+      if ((url.protocol !== 'http:' && url.protocol !== 'https:') || !url.hostname) {
+        throw new Error('Unsupported image URL');
+      }
+
+      urls.push(url.href);
+    } catch (error) {
+      invalidLines.push(index + 1);
+    }
+  });
+
+  return { urls, invalidLines };
+}
+
+function loadImagePanelItem(item, url, pageNumber, onSettled = null) {
+  const image = document.createElement('img');
+  image.className = 'image-panel-image';
+  image.alt = `Page ${pageNumber}`;
+  image.loading = 'eager';
+  image.decoding = 'async';
+
+  image.addEventListener('load', () => {
+    if (onSettled) {
+      onSettled();
+    }
+  }, { once: true });
+
+  image.addEventListener('error', () => {
+    const placeholder = document.createElement('div');
+    placeholder.className = 'image-load-failure';
+
+    const title = document.createElement('strong');
+    title.textContent = `Page ${pageNumber} failed to load`;
+
+    const urlText = document.createElement('span');
+    urlText.className = 'image-load-failure-url';
+    urlText.textContent = url;
+
+    const retryButton = document.createElement('button');
+    retryButton.className = 'image-retry-btn';
+    retryButton.type = 'button';
+    retryButton.textContent = 'Retry';
+    retryButton.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      loadImagePanelItem(item, url, pageNumber);
+    });
+
+    placeholder.append(title, urlText, retryButton);
+    item.replaceChildren(placeholder);
+
+    if (onSettled) {
+      onSettled();
+    }
+  }, { once: true });
+
+  item.replaceChildren(image);
+  image.src = url;
+}
+
+function renderImagePanel(text, target) {
+  const { urls, invalidLines } = parseImagePanelText(text);
+  target.replaceChildren();
+
+  if (invalidLines.length) {
+    const warning = document.createElement('div');
+    warning.className = 'image-panel-warning';
+    warning.setAttribute('role', 'alert');
+
+    const visibleLines = invalidLines.slice(0, 8).join(', ');
+    const remainingCount = invalidLines.length - 8;
+    const lineSummary = remainingCount > 0
+      ? `${visibleLines}, and ${remainingCount} more`
+      : visibleLines;
+
+    warning.textContent = `${invalidLines.length} invalid image ${invalidLines.length === 1 ? 'link was' : 'links were'} skipped (line${invalidLines.length === 1 ? '' : 's'} ${lineSummary}). Use one http:// or https:// URL per line.`;
+    target.appendChild(warning);
+  }
+
+  if (!urls.length) {
+    const emptyState = document.createElement('div');
+    emptyState.className = 'image-panel-empty';
+    emptyState.textContent = text.trim()
+      ? 'No valid image links to render.'
+      : 'Paste one CDN image URL per line, then switch to Render.';
+    target.appendChild(emptyState);
+    return null;
+  }
+
+  const initialLoad = new Promise((resolve) => {
+    let remainingImages = urls.length;
+
+    const handleImageSettled = () => {
+      remainingImages -= 1;
+
+      if (remainingImages === 0) {
+        resolve();
+      }
+    };
+
+    urls.forEach((url, index) => {
+      const item = document.createElement('div');
+      item.className = 'image-panel-item';
+      target.appendChild(item);
+      loadImagePanelItem(item, url, index + 1, handleImageSettled);
+    });
+  });
+
+  return initialLoad;
+}
+
 function performRender() {
   collectPanelValues({ preserveRenderScroll: true });
 
   panels.forEach((panel) => {
     const pane = elements.workspace.querySelector(`[data-panel-id="${panel.id}"]`);
-    const target = pane ? pane.querySelector('.rendered-markdown') : null;
+    const target = pane ? pane.querySelector('.rendered-output') : null;
 
     if (target) {
-      renderMarkdown(panel.text, target);
+      if (panel.type === PANEL_TYPE_IMAGES) {
+        const initialLoad = renderImagePanel(panel.text, target);
+
+        if (initialLoad) {
+          initialLoad.then(() => {
+            if (viewMode === 'render' && target.isConnected) {
+              restorePanelScroll(panel);
+            }
+          });
+        }
+      } else {
+        renderMarkdown(panel.text, target);
+      }
     }
   });
 
@@ -776,11 +921,22 @@ function resetLayout() {
 }
 
 function createPaneMarkup(panel, index) {
+  const isImagePanel = panel.type === PANEL_TYPE_IMAGES;
   const hiddenEditorClass = viewMode === 'render' ? ' hidden' : '';
   const hiddenRenderClass = viewMode === 'render' ? '' : ' hidden';
+  const paneTypeClass = isImagePanel ? ' image-pane' : '';
+  const editorTypeClass = isImagePanel ? ' image-url-editor' : '';
+  const renderedViewTypeClass = isImagePanel ? ' image-rendered-view' : '';
+  const renderedOutputClass = isImagePanel ? 'rendered-images' : 'rendered-markdown';
+  const editorLabel = isImagePanel
+    ? `Image panel ${index + 1} URL editor`
+    : `Panel ${index + 1} text editor`;
+  const editorPlaceholder = isImagePanel
+    ? 'Paste one CDN image URL per line...'
+    : 'Paste or type text here...';
 
   return `
-    <section class="pane" data-panel-id="${panel.id}">
+    <section class="pane${paneTypeClass}" data-panel-id="${panel.id}" data-panel-type="${panel.type}">
       <div class="panel-actions" aria-label="Panel actions">
         <button class="panel-action-btn" type="button" data-panel-action="copy" title="Copy panel" aria-label="Copy panel">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" width="14" height="14"><rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
@@ -790,10 +946,10 @@ function createPaneMarkup(panel, index) {
         </button>
       </div>
       <div class="pane-content editor-view${hiddenEditorClass}">
-        <textarea class="code-editor" aria-label="Panel ${index + 1} text editor" placeholder="Paste or type text here..." spellcheck="false"></textarea>
+        <textarea class="code-editor${editorTypeClass}" aria-label="${editorLabel}" placeholder="${editorPlaceholder}" spellcheck="false"></textarea>
       </div>
-      <div class="pane-content rendered-view${hiddenRenderClass}">
-        <div class="rendered-markdown"></div>
+      <div class="pane-content rendered-view${renderedViewTypeClass}${hiddenRenderClass}">
+        <div class="rendered-output ${renderedOutputClass}"></div>
       </div>
     </section>
   `;
@@ -1060,7 +1216,7 @@ function setViewMode(mode) {
   panels.forEach(restorePanelScroll);
 }
 
-function addPanel() {
+function addPanelOfType(panelType) {
   cancelDeleteMode();
   collectPanelValues();
 
@@ -1068,21 +1224,25 @@ function addPanel() {
   paneSizes = normalizePaneSizes(paneSizes).map((size) => size * ((100 - newPanelSize) / 100));
   paneSizes.push(newPanelSize);
 
-  panels.push({
-    id: createPanelId(),
-    text: '',
-    editorScrollTop: 0,
-    renderScrollTop: 0
-  });
+  const newPanel = createPanel(panelType);
+  panels.push(newPanel);
 
   renderWorkspace();
   setViewMode('edit');
   setDirty(true);
 
-  const newTextarea = elements.workspace.querySelector(`[data-panel-id="${panels[panels.length - 1].id}"] textarea`);
+  const newTextarea = elements.workspace.querySelector(`[data-panel-id="${newPanel.id}"] textarea`);
   if (newTextarea) {
     newTextarea.focus();
   }
+}
+
+function addPanel() {
+  addPanelOfType(PANEL_TYPE_TEXT);
+}
+
+function addImagePanel() {
+  addPanelOfType(PANEL_TYPE_IMAGES);
 }
 
 function beginDeletePanelMode() {
@@ -1721,6 +1881,7 @@ function setupListeners() {
     }
   });
   elements.btnAddPanel.addEventListener('click', addPanel);
+  elements.btnAddImagePanel.addEventListener('click', addImagePanel);
   elements.btnDeletePanel.addEventListener('click', beginDeletePanelMode);
   elements.btnDeleteCancel.addEventListener('click', cancelPendingDelete);
   elements.btnDeleteConfirm.addEventListener('click', confirmPendingDelete);
