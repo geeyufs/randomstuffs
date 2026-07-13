@@ -671,12 +671,6 @@ function renderImagePanel(text, target) {
   }
 
   if (!urls.length) {
-    const emptyState = document.createElement('div');
-    emptyState.className = 'image-panel-empty';
-    emptyState.textContent = text.trim()
-      ? 'No valid image links to render.'
-      : 'Paste one CDN image URL per line, then switch to Render.';
-    target.appendChild(emptyState);
     return null;
   }
 
@@ -922,6 +916,8 @@ function resetLayout() {
 
 function createPaneMarkup(panel, index) {
   const isImagePanel = panel.type === PANEL_TYPE_IMAGES;
+  const moveLeftDisabled = index === 0 ? ' disabled' : '';
+  const moveRightDisabled = index === panels.length - 1 ? ' disabled' : '';
   const hiddenEditorClass = viewMode === 'render' ? ' hidden' : '';
   const hiddenRenderClass = viewMode === 'render' ? '' : ' hidden';
   const paneTypeClass = isImagePanel ? ' image-pane' : '';
@@ -938,6 +934,12 @@ function createPaneMarkup(panel, index) {
   return `
     <section class="pane${paneTypeClass}" data-panel-id="${panel.id}" data-panel-type="${panel.type}">
       <div class="panel-actions" aria-label="Panel actions">
+        <button class="panel-action-btn" type="button" data-panel-action="move-left" title="Move panel left" aria-label="Move panel left"${moveLeftDisabled}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" width="14" height="14"><path d="m15 18-6-6 6-6"></path></svg>
+        </button>
+        <button class="panel-action-btn" type="button" data-panel-action="move-right" title="Move panel right" aria-label="Move panel right"${moveRightDisabled}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" width="14" height="14"><path d="m9 18 6-6-6-6"></path></svg>
+        </button>
         <button class="panel-action-btn" type="button" data-panel-action="copy" title="Copy panel" aria-label="Copy panel">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" width="14" height="14"><rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
         </button>
@@ -1085,6 +1087,31 @@ function clearPanelById(panelId) {
   }
 }
 
+function movePanelById(panelId, direction) {
+  collectPanelValues();
+
+  const panelIndex = panels.findIndex((panel) => panel.id === panelId);
+  const targetIndex = panelIndex + direction;
+
+  if (panelIndex === -1 || targetIndex < 0 || targetIndex >= panels.length) {
+    return;
+  }
+
+  [panels[panelIndex], panels[targetIndex]] = [panels[targetIndex], panels[panelIndex]];
+  [paneSizes[panelIndex], paneSizes[targetIndex]] = [paneSizes[targetIndex], paneSizes[panelIndex]];
+
+  renderWorkspace();
+  setDirty(true);
+
+  const action = direction < 0 ? 'move-left' : 'move-right';
+  const movedPane = elements.workspace.querySelector(`[data-panel-id="${panelId}"]`);
+  const movedButton = movedPane ? movedPane.querySelector(`[data-panel-action="${action}"]`) : null;
+
+  if (movedButton && !movedButton.disabled) {
+    movedButton.focus();
+  }
+}
+
 function handlePanelActionClick(e) {
   const button = e.target.closest('.panel-action-btn');
 
@@ -1102,7 +1129,11 @@ function handlePanelActionClick(e) {
     return;
   }
 
-  if (button.dataset.panelAction === 'copy') {
+  if (button.dataset.panelAction === 'move-left') {
+    movePanelById(panelId, -1);
+  } else if (button.dataset.panelAction === 'move-right') {
+    movePanelById(panelId, 1);
+  } else if (button.dataset.panelAction === 'copy') {
     copyPanelById(panelId).catch((error) => {
       console.warn('Unable to copy panel text.', error);
     });

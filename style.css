@@ -470,7 +470,8 @@ input {
   transition: opacity 0.16s ease;
 }
 
-.pane:hover .panel-actions {
+.pane:hover .panel-actions,
+.pane:focus-within .panel-actions {
   opacity: 1;
   pointer-events: auto;
 }
@@ -494,10 +495,15 @@ input {
   transition: background-color 0.16s ease, color 0.16s ease, border-color 0.16s ease;
 }
 
-.panel-action-btn:hover {
+.panel-action-btn:hover:not(:disabled) {
   background-color: var(--btn-hover);
   color: var(--text-primary);
   border-color: #2e3241;
+}
+
+.panel-action-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
 }
 
 /* (Pane Header styles removed) */
@@ -735,7 +741,6 @@ input {
   line-height: 1.45;
 }
 
-.image-panel-empty,
 .image-load-failure {
   width: 100%;
   min-height: 150px;
